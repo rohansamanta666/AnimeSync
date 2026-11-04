@@ -1,0 +1,1 @@
+"""AnimeSync Backend Application Package"""

@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-void-950 text-ink-text overflow-x-hidden;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom Japanese-inspired scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0b10;
+}
+::-webkit-scrollbar-thumb {
+  background: #232846;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #8b5cf6;
+}
+
+/* Glowing text and borders */
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-violet-accent via-pink-accent to-cyan-accent;
+}
+
+.text-gradient-subtle {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-ink-text to-ink-muted;
+}
+
+.glass-panel {
+  @apply bg-void-900/80 backdrop-blur-md border border-void-600/50 shadow-xl;
+}
+
+.glass-panel-elevated {
+  @apply bg-void-800/90 backdrop-blur-lg border border-void-600 shadow-2xl;
+}
