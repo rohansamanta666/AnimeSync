@@ -88,3 +88,4 @@ export const CreateRoomModal: React.FC<CreateRoomModalProps> = ({ isOpen, onClos
     </Modal>
   );
 };
+

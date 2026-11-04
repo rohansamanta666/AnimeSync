@@ -19,16 +19,24 @@ graph TD
 ### 2.1 Backend Tests (`pytest`)
 Located in `backend/tests/`:
 - **`test_rooms.py`**:
+  - Health check endpoint and host storage disk capacity validation.
   - Room creation and unique 6-character code formatting.
-  - Join room validation (username sanitation, participant limits).
-  - Session authorization token verification.
-- **`test_upload.py`**:
+  - Join room validation (username sanitization, participant token issuance).
+  - Single Page Application serving verification.
+- **`test_presence.py`**:
+  - Two participants joining the same room: verifying both appear online in the room presence snapshot.
+  - Room channel isolation: verifying that participants in Room A never receive presence updates or leak membership into Room B.
+  - Unauthorized access rejection: verifying that invalid room codes, invalid session tokens, or non-existent participant IDs are immediately rejected with `ROOM_NOT_FOUND` / `AUTH_FAILED`.
+  - Multi-tab and duplicate connection resilience: verifying that opening 2 tabs registers 2 active connections, closing 1 tab keeps the user online, and closing the final tab marks them offline.
+  - Unexpected disconnect and reconnection: verifying that reconnecting with a fresh socket restores presence and updates `last_seen`.
+  - Explicit room leave handling: verifying that `leave_room` unregisters the participant cleanly.
+- **`test_upload.py`** (Phase 3):
   - Chunked upload initialization.
   - Sequential chunk saving and boundary validation.
   - File assembly and SHA-256 hash comparison between uploaded stream and raw file.
   - Prevention of path traversal attacks (`../../` filenames).
   - Resumable upload chunk index tracking.
-- **`test_sync.py`**:
+- **`test_sync.py`** (Phase 5):
   - Server-authoritative playback state transitions (play, pause, seek, speed).
   - Monotonic sequence number generation.
   - Originating socket filtering (avoiding client self-echo loops).
@@ -66,3 +74,4 @@ Before declaring any release ready, execute this manual protocol across two inde
 | **16**| Test Independent Audio | Adjusting anime volume has zero effect on peer voice volume. | [ ] |
 | **17**| Test Sidebar Collapse | Clicking arrow collapses chat/participant sidebar; video expands smoothly. | [ ] |
 | **18**| Test Fullscreen Mode | Pressing `F` hides all UI elements; mouse movement shows controls; Escape exits. | [ ] |
+

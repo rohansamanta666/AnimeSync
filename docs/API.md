@@ -82,13 +82,80 @@ All REST endpoints are prefixed with `/api`.
 
 ## 2. Real-Time Socket.IO Protocol
 
-### 2.1 Connection & Presence
+### 2.1 Connection, Authentication & Presence
 - **Client $\rightarrow$ Server: `join_room`**
-  - Payload: `{"room_code": "ASYNC1", "participant_id": "uuid", "token": "session-token"}`
-- **Server $\rightarrow$ Client: `room_state`**
-  - Full room snapshot (participants, queue, playback state, chat history).
+  - Payload:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "participant_id": "participant-uuid",
+      "session_token": "64-char-hex-session-token"
+    }
+    ```
+  - *Server Enforcement*: Validates database record matching `(room_code, participant_id, session_token)`. Rejects unauthorized connections with `error` (`AUTH_FAILED` or `ROOM_NOT_FOUND`).
+- **Server $\rightarrow$ Client (Emitter): `room_joined`**
+  - Payload:
+    ```json
+    {
+      "success": true,
+      "room_code": "ASYNC1",
+      "room": { ...full room snapshot... },
+      "presence": [
+        {
+          "id": "participant-uuid",
+          "username": "Rohan",
+          "is_host": true,
+          "is_online": true,
+          "status": "WAITING_FOR_FILE",
+          "active_connections": 1,
+          "last_seen": "2026-11-04T18:00:00Z"
+        }
+      ]
+    }
+    ```
 - **Server $\rightarrow$ Room: `presence_updated`**
-  - List of connected participants and their online/offline state.
+  - Broadcast to room channel when any participant's online/offline status or active connection count changes:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "participants": [
+        {
+          "id": "uuid",
+          "username": "Rohan",
+          "is_host": true,
+          "is_online": true,
+          "status": "WAITING_FOR_FILE",
+          "active_connections": 1,
+          "last_seen": "..."
+        }
+      ]
+    }
+    ```
+- **Server $\rightarrow$ Room: `user_joined`**
+  - Broadcast when a newly online participant joins the room:
+    ```json
+    {
+      "participant_id": "participant-uuid",
+      "username": "Alex",
+      "is_host": false,
+      "timestamp": 1730740000.0
+    }
+    ```
+- **Server $\rightarrow$ Room: `user_left`**
+  - Broadcast when a participant closes their final active connection or explicitly leaves:
+    ```json
+    {
+      "participant_id": "participant-uuid",
+      "username": "Alex",
+      "timestamp": 1730740010.0
+    }
+    ```
+- **Client $\rightarrow$ Server: `leave_room`**
+  - Payload: `{"room_code": "ASYNC1"}`
+- **Server $\rightarrow$ Client: `room_left`**
+  - Payload: `{"room_code": "ASYNC1"}`
+- **Server $\rightarrow$ Client: `error`**
+  - Payload: `{"code": "AUTH_FAILED" | "ROOM_NOT_FOUND" | "INVALID_PAYLOAD", "message": "..."}`
 
 ### 2.2 Ready-to-Watch & File Verification
 - **Client $\rightarrow$ Server: `verify_file`**
@@ -146,3 +213,4 @@ All REST endpoints are prefixed with `/api`.
   - Payload: `{"is_speaking": true}`
 - **Server $\rightarrow$ Room: `peer_speaking`**
   - Broadcasts voice activity indicator to update the avatar ring.
+

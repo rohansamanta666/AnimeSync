@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 1 (Foundation & UI Design System) — **COMPLETED**
-- **Next Phase**: Phase 2 (Private Rooms & Realtime Presence)
+- **Current Phase**: Phase 2 (Private Rooms & Realtime Presence) — **COMPLETED**
+- **Next Phase**: Phase 3 (Video Distribution & File Verification)
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -14,8 +14,8 @@
 | Phase | Description | Status | Completion % |
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | Foundation & UI Design System | **COMPLETED** | 100% |
-| **Phase 2** | Private Rooms & Realtime Presence | Up Next | 0% |
-| **Phase 3** | Video Distribution & File Verification | Pending | 0% |
+| **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
+| **Phase 3** | Video Distribution & File Verification | Up Next | 0% |
 | **Phase 4** | Ready-to-Watch System | Pending | 0% |
 | **Phase 5** | Synchronized Video Player | Pending | 0% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
@@ -25,40 +25,38 @@
 
 ---
 
-## 3. Completed Features (Phase 1)
-- [x] **Project Scaffolding**: Modular monolith structure (`backend`, `frontend`, `storage/videos`, `storage/uploads_temp`, `docs`, `scripts`).
-- [x] **Zero-Cost Audit & Evaluation**: Documented 100% free operation using Mac local hosting, SQLite, WebRTC Google STUN, and Cloudflare Quick Tunnel / Tailscale in `docs/COST_AND_FREE_SERVICES.md`.
-- [x] **Complete Architecture & ADRs**: Documented in `docs/ARCHITECTURE.md` and `docs/DECISIONS.md`.
-- [x] **Backend Infrastructure**:
-  - FastAPI with lifespan initialization.
-  - SQLAlchemy 2.0 async engine (`sqlite+aiosqlite`) with automatic table creation (`Room`, `Participant`, `Episode`, `Message`).
-  - Cryptographically secure 6-character room codes (`ROOM_CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"`).
-  - 64-hex-char guest session tokens.
-  - REST API endpoints for `/api/health`, `POST /api/rooms`, `GET /api/rooms/{code}`, and `POST /api/rooms/{code}/join`.
-  - Built-in static file serving for compiled React SPA in production mode.
-- [x] **Frontend Design System**:
-  - React 18, TypeScript, Vite, Tailwind CSS with custom Japanese dark theme palette (`void-950`, `void-900`, `void-800`, `violet-accent`, `pink-accent`, `cyan-accent`, `ink-text`, `ink-muted`).
-  - Reusable UI component library: `Button`, `Input`, `Card`, `Badge`, `Modal`, `Navbar`.
-- [x] **Core Pages**:
-  - Landing Page with hero copy ("Your Anime Night. Together."), visual preview, and feature pillars.
-  - Create Room Modal with immediate code generation and session caching.
-  - Join Room Modal with 6-char formatted code input.
-  - Room Lobby / Dashboard with 1-click invitation link copier and participant presence list.
-  - 404 Not Found Page.
-- [x] **Automated Verification**:
-  - `backend/tests/test_rooms.py` testing health, room creation, joining, and SPA serving.
-  - `./scripts/test.sh` automating backend pytest and frontend TypeScript / Vite production build.
-  - `./scripts/start.sh` and `./scripts/stop.sh` for one-command execution with macOS `caffeinate` sleep prevention.
+## 3. Completed Features
+
+### Phase 1: Foundation & UI Design System
+- [x] Modular monolith project scaffolding (`backend`, `frontend`, `storage/videos`, `storage/uploads_temp`, `docs`, `scripts`).
+- [x] Zero-cost infrastructure verification and documentation.
+- [x] Database models: `Room`, `Participant`, `Episode`, `Message` with SQLAlchemy 2.0 Async + SQLite (`aiosqlite`).
+- [x] 6-character room codes and 64-hex-char guest session authentication.
+- [x] Japanese-inspired dark mode UI design system with Tailwind CSS tokens and component library.
+- [x] Landing page, Create Room modal, Join Room modal, and Watch Room dashboard.
+- [x] `./scripts/start.sh`, `./scripts/stop.sh`, and `./scripts/test.sh` automation scripts.
+
+### Phase 2: Private Rooms & Realtime Presence
+- [x] **python-socketio ASGI Integration**: AsyncServer mounted via `socketio.ASGIApp` wrapping FastAPI, supporting both WebSocket transport and HTTP endpoints.
+- [x] **Authoritative Guest Session Authentication**: Sockets connecting to `join_room` must present valid `(room_code, participant_id, session_token)` verified against SQLite. Unauthorized sockets receive `AUTH_FAILED` and are rejected.
+- [x] **Strict Channel Isolation**: Room events broadcast only to authorized participants entered in `sio.enter_room(sid, room_code)`.
+- [x] **Multi-Tab & Duplicate Connection Handling**: Implemented `ConnectionManager` tracking `(room_code, participant_id) -> Set[sid]`. Multiple open tabs represent a single logical user (`Online (2 tabs)`). Disconnecting one tab preserves online state; disconnecting all tabs marks the user offline.
+- [x] **Real-Time Presence Handlers**: `join_room`, `leave_room`, `disconnect`, `user_joined`, `user_left`, `presence_updated`.
+- [x] **Frontend `useSocket` Hook**: Connection state tracking (`connecting`, `connected`, `disconnected`, `reconnecting`, `error`), automatic re-auth on reconnect, and event cleanup.
+- [x] **Live Room Lobby UI**:
+  - Live socket connection status indicator (Realtime Active / Connecting / Offline).
+  - Real-time participant cards with initials avatar, host badge, online pulse indicator, and active tab counts.
+  - Graceful join modal prompt for users opening shared room links.
+  - Real-time error banner with one-click reconnect trigger.
 
 ---
 
 ## 4. In-Progress Features
-- Transitioning to **Phase 2: Private Rooms & Realtime Presence**.
+- Transitioning to **Phase 3: Video Distribution & File Verification**.
 
 ---
 
 ## 5. Pending Features
-- Phase 2: Python-SocketIO ASGI server integration, presence events (`join_room`, `leave_room`, `disconnect`), reconnect reconciliation.
 - Phase 3: 5MB chunked video upload, disk storage, range-based download, Web Worker SHA-256 calculation.
 - Phase 4: Ready-to-Watch state machine, verification validation, synchronized countdown.
 - Phase 5: HTML5 local video player, server-authoritative sync, adaptive drift correction, buffering recovery.
@@ -78,21 +76,30 @@
 - `backend/tests/test_rooms.py::test_health_check` — **PASSED**
 - `backend/tests/test_rooms.py::test_spa_serving` — **PASSED**
 - `backend/tests/test_rooms.py::test_room_lifecycle` — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2077 modules transformed, 0 errors)
-- Execution of `./scripts/test.sh` — **PASSED**
+- `backend/tests/test_presence.py::test_two_participants_join_same_room` — **PASSED**
+- `backend/tests/test_presence.py::test_room_isolation_different_rooms` — **PASSED**
+- `backend/tests/test_presence.py::test_unauthorized_room_access` — **PASSED**
+- `backend/tests/test_presence.py::test_multiple_tabs_and_duplicate_connections` — **PASSED**
+- `backend/tests/test_presence.py::test_unexpected_disconnect_and_reconnection` — **PASSED**
+- `backend/tests/test_presence.py::test_explicit_leave_room` — **PASSED**
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2108 modules transformed, 0 errors)
+- Execution of master `./scripts/test.sh` — **PASSED** (All 9 tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 2 Implementation**:
-  1. Integrate `python-socketio` AsyncServer with the FastAPI ASGI application.
-  2. Implement real-time room presence handlers (`connect`, `join_room`, `leave_room`, `disconnect`).
-  3. Create frontend `useSocket` hook and Socket.IO client service to subscribe to presence updates and show live participant indicators in the Room Lobby.
+- **Phase 3 Implementation**:
+  1. Build Chunked Upload API (`/api/files/upload/init`, `/api/files/upload/chunk`, `/api/files/upload/complete`) using 5MB chunks and safe storage in `storage/videos/`.
+  2. Implement server-side incremental SHA-256 hash generation during upload finalization.
+  3. Implement range-based file download endpoint (`/api/files/download/{id}`).
+  4. Build Client-side Upload UI with chunk progress and cancel/resume capability.
+  5. Build Client-side Download UI with byte progress.
+  6. Implement Web Worker streaming SHA-256 calculator for locally selected files.
+  7. Implement `verify_file` socket event for server-authoritative hash validation against database.
 
 ---
 
 ## 9. Important Decisions Logged
-- Video files are stored in `storage/videos/` on host Mac; never in SQLite.
-- 5MB chunked uploads selected to guarantee zero failures on Cloudflare free tunnels (which have a 100MB body cap).
-- Dual audio pipeline: HTML5 `<video>` for anime audio and Web Audio API `GainNode` for voice, guaranteeing independent volume and mute controls.
-- Single unified ASGI application serving both REST API, Socket.IO, and compiled React SPA.
+- **ADR-008**: Multi-Tab Socket Tracking & Room Membership Reconciliation (`ConnectionManager` tracks `(room_code, participant_id) -> Set[sid]`).
+- Python-SocketIO mounted via `socketio.ASGIApp` wrapping FastAPI, maintaining transparent ASGI 3 pass-through for HTTP endpoints and static SPA delivery.
+- Sockets must authenticate with database-backed session tokens before entering rooms.

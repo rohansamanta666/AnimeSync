@@ -46,3 +46,4 @@ async def join_room(code: str, req: RoomJoinRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to join room: {str(e)}")
+

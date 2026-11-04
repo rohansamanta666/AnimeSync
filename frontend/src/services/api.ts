@@ -77,3 +77,4 @@ export const sessionStore = {
     localStorage.removeItem(`${SESSION_KEY_PREFIX}${roomCode.toUpperCase()}`);
   },
 };
+

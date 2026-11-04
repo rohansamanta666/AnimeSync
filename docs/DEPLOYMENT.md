@@ -96,3 +96,4 @@ This ensures:
 - **Port 8000 already in use**:
   - Check running processes: `lsof -i :8000`
   - Terminate: `kill -9 <PID>`
+

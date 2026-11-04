@@ -20,3 +20,4 @@ if [ -n "$CF_PID" ]; then
 fi
 
 echo "All AnimeSync services stopped cleanly."
+

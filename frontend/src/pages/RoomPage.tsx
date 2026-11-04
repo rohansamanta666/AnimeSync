@@ -10,9 +10,11 @@ import {
   Sparkles,
   ShieldCheck,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
-import { Room, RoomAuth, Participant } from '../types';
+import { Room, RoomAuth, ParticipantPresence } from '../types';
+import { useSocket } from '../hooks/useSocket';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
@@ -22,13 +24,14 @@ export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
 
-  const [room, setRoom] = useState<Room | null>(null);
+  const [initialRoom, setInitialRoom] = useState<Room | null>(null);
   const [auth, setAuth] = useState<RoomAuth | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
+  // Load saved session on mount
   useEffect(() => {
     if (!code) {
       navigate('/');
@@ -41,11 +44,10 @@ export const RoomPage: React.FC = () => {
       setAuth(storedAuth);
     }
 
-    // Fetch latest room data
+    // Fetch initial room data from REST
     api.getRoom(cleanCode)
       .then((data: Room) => {
-        setRoom(data);
-        // If not authenticated for this room, prompt to join
+        setInitialRoom(data);
         if (!storedAuth) {
           setShowJoinModal(true);
         }
@@ -58,6 +60,19 @@ export const RoomPage: React.FC = () => {
       });
   }, [code, navigate]);
 
+  // Connect via real-time WebSocket hook
+  const {
+    connectionStatus,
+    presence,
+    roomSnapshot,
+    error: socketError,
+    reconnect,
+  } = useSocket(auth);
+
+  // Authoritative current room data (prefer real-time snapshot when available)
+  const room = roomSnapshot || initialRoom;
+
+  // Handle invitation link copying
   const handleCopyLink = () => {
     const inviteUrl = window.location.href;
     navigator.clipboard.writeText(inviteUrl);
@@ -97,19 +112,48 @@ export const RoomPage: React.FC = () => {
     );
   }
 
+  // Participants list: prefer real-time presence, fallback to initial REST list
+  const activeParticipants: ParticipantPresence[] = presence.length > 0
+    ? presence
+    : room.participants.map((p) => ({
+        id: p.id,
+        username: p.username,
+        is_host: p.is_host,
+        is_online: false,
+        status: p.status,
+        active_connections: 0,
+        last_seen: p.last_seen,
+      }));
+
   const currentParticipant = auth
-    ? room.participants.find((p: Participant) => p.id === auth.participant_id)
+    ? activeParticipants.find((p) => p.id === auth.participant_id)
     : null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Real-time Socket Error Notice */}
+      {socketError && (
+        <div className="flex items-center justify-between p-4 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-200 text-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{socketError}</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={reconnect} leftIcon={<RefreshCw className="w-3.5 h-3.5" />}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       {/* Top Header Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-5 rounded-2xl border border-void-600/80">
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate('/')}
+            onClick={() => {
+              if (auth) sessionStore.remove(auth.room.code);
+              navigate('/');
+            }}
             leftIcon={<ArrowLeft className="w-4 h-4" />}
           >
             Leave
@@ -138,8 +182,32 @@ export const RoomPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Share & Invite Buttons */}
-        <div className="flex items-center gap-2.5">
+        {/* Real-time Connection State & Share Buttons */}
+        <div className="flex items-center gap-3">
+          {/* Socket Connection Badge */}
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono bg-void-900 border border-void-700">
+            {connectionStatus === 'connected' ? (
+              <span className="flex items-center gap-1.5 text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Realtime Active</span>
+              </span>
+            ) : connectionStatus === 'connecting' || connectionStatus === 'reconnecting' ? (
+              <span className="flex items-center gap-1.5 text-amber-400">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                <span>Connecting...</span>
+              </span>
+            ) : (
+              <button
+                onClick={reconnect}
+                className="flex items-center gap-1.5 text-rose-400 hover:text-rose-300 transition-colors"
+                title="Click to reconnect"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-400" />
+                <span>Offline (Reconnect)</span>
+              </button>
+            )}
+          </div>
+
           <Button
             variant="secondary"
             size="sm"
@@ -194,29 +262,41 @@ export const RoomPage: React.FC = () => {
           </Card>
         </div>
 
-        {/* Sidebar: Participants & Room Info (1 Col) */}
+        {/* Sidebar: Real-time Participants & Presence (1 Col) */}
         <div className="space-y-6">
-          {/* Participants Card */}
           <Card variant="default">
             <div className="flex items-center justify-between pb-3 border-b border-void-700/60 mb-4">
               <div className="flex items-center gap-2">
                 <Users className="w-4 h-4 text-violet-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Participants ({room.participants.length})
+                  Participants ({activeParticipants.length})
                 </h3>
               </div>
+              <span className="text-[11px] font-mono text-ink-dim">
+                {activeParticipants.filter((p) => p.is_online).length} Online
+              </span>
             </div>
 
             <div className="space-y-3">
-              {room.participants.map((p: Participant) => (
+              {activeParticipants.map((p) => (
                 <div
                   key={p.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60"
+                  className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60 transition-all duration-200"
                 >
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white">
-                      {p.username.charAt(0).toUpperCase()}
+                  <div className="flex items-center gap-3">
+                    {/* Avatar with Online Pulse Indicator */}
+                    <div className="relative">
+                      <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white shadow-sm">
+                        {p.username.charAt(0).toUpperCase()}
+                      </div>
+                      <span
+                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-void-900 ${
+                          p.is_online ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-void-600'
+                        }`}
+                        title={p.is_online ? 'Online' : 'Offline'}
+                      />
                     </div>
+
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-sm font-medium text-white">{p.username}</span>
@@ -226,9 +306,21 @@ export const RoomPage: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-ink-dim font-mono">
-                        {p.id === auth?.participant_id ? '(You)' : 'Peer'}
-                      </span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-ink-dim font-mono">
+                          {p.id === auth?.participant_id ? '(You)' : 'Peer'}
+                        </span>
+                        <span className="text-void-600">•</span>
+                        <span
+                          className={`text-[10px] font-mono ${
+                            p.is_online ? 'text-emerald-400 font-semibold' : 'text-ink-dim'
+                          }`}
+                        >
+                          {p.is_online ? (
+                            p.active_connections > 1 ? `Online (${p.active_connections} tabs)` : 'Online'
+                          ) : 'Offline'}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -238,13 +330,13 @@ export const RoomPage: React.FC = () => {
             </div>
           </Card>
 
-          {/* Quick How-to Card */}
+          {/* Watch Party How-to Guide */}
           <Card variant="outline" className="text-xs text-ink-muted space-y-2">
             <div className="font-semibold text-white flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-cyan-400" />
               <span>How AnimeSync Works:</span>
             </div>
-            <ol className="list-decimal list-inside space-y-1 text-ink-dim text-[11px] leading-relaxed">
+            <ol className="list-decimal list-inside space-y-1.5 text-ink-dim text-[11px] leading-relaxed">
               <li>Host uploads or queues an anime episode.</li>
               <li>Friend downloads the episode to their computer.</li>
               <li>Both participants select their local file to verify SHA-256.</li>
@@ -258,7 +350,15 @@ export const RoomPage: React.FC = () => {
       {showJoinModal && (
         <JoinRoomModal
           isOpen={showJoinModal}
-          onClose={() => setShowJoinModal(false)}
+          onClose={() => {
+            setShowJoinModal(false);
+            if (code) {
+              const updatedAuth = sessionStore.get(code.toUpperCase());
+              if (updatedAuth) {
+                setAuth(updatedAuth);
+              }
+            }
+          }}
           initialCode={room.code}
         />
       )}

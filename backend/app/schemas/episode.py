@@ -22,3 +22,4 @@ class UploadCompleteRequest(BaseModel):
 class VerifyFileRequest(BaseModel):
     episode_id: str
     sha256_hash: str
+

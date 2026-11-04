@@ -20,3 +20,4 @@ class Message(Base):
     )
 
     room = relationship("Room", back_populates="messages")
+

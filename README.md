@@ -10,6 +10,7 @@ AnimeSync is a private, desktop-first, online anime watch-party application allo
 ## Key Features
 
 - **Local Playback with Zero Server Bandwidth**: Video files are played directly from each participant's local disk. The server coordinates synchronization via lightweight Socket.IO packets, ensuring 1080p/4K 60fps quality with zero buffering or video proxy limits.
+- **Real-Time Presence & Multi-Tab Resilience**: Authenticated Socket.IO rooms with multi-tab connection reconciliation. Disconnecting one tab keeps the user online; departures and arrivals update in real time with strict channel isolation.
 - **5MB Chunked Resumable Upload & Download**: Large anime episodes are transferred efficiently in 5MB chunks, bypassing free tunnel limits (such as Cloudflare's 100MB body limit) with range-request download resumption.
 - **SHA-256 Web Worker Verification**: Guarantees both participants are watching the exact same file. Incremental background streaming hashing keeps the browser UI smooth and responsive.
 - **Server-Authoritative Ready-to-Watch System**: Playback is gated until both participants have verified matching files and clicked "Ready". A synchronized 3-second countdown launches playback together.
@@ -66,3 +67,4 @@ Open `http://localhost:8000` in your browser. If you launched Cloudflare Tunnel,
 ## Acceptance Testing Checklist
 
 AnimeSync is thoroughly verified against a 32-step acceptance criteria matrix covering chunked transfer, Web Worker hash verification, ready gates, drift correction, WebRTC voice, PTT, independent audio, and keyboard shortcuts. See [docs/TESTING.md](docs/TESTING.md) for details.
+

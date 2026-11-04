@@ -100,3 +100,4 @@ export const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
     </Modal>
   );
 };
+

@@ -73,3 +73,4 @@ To allow a friend on a different Wi-Fi / home network to join without paid serve
 ## 5. Host Mac Power & Storage Precautions
 1. **Mac Sleep Prevention**: When hosting a watch party, the Mac host must prevent sleep during the session (e.g., using macOS built-in `caffeinate` command in the start script).
 2. **Storage Management**: Video files are stored in `storage/videos/`. AnimeSync includes a Media Management dashboard showing disk usage and enabling safe one-click manual deletion of watched files.
+

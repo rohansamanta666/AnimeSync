@@ -18,7 +18,21 @@ export interface Participant {
   is_host: boolean;
   status: ParticipantStatus;
   last_seen: string;
+  is_online?: boolean;
+  active_connections?: number;
 }
+
+export interface ParticipantPresence {
+  id: string;
+  username: string;
+  is_host: boolean;
+  is_online: boolean;
+  status: ParticipantStatus;
+  active_connections: number;
+  last_seen?: string | null;
+}
+
+export type SocketConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
 
 export interface Episode {
   id: string;

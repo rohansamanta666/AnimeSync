@@ -46,3 +46,12 @@
 - **Context**: In peer-to-peer sync, Client A pausing can cause Client B to auto-correct, creating an infinite feedback loop of play/pause events.
 - **Decision**: The backend server is the sole authority for playback state. Every command carries a monotonic `sequence_number` and the client's socket ID. The server validates the command, updates the authoritative state, and broadcasts the event with the originating ID so the sender ignores self-echoes.
 - **Consequences**: Eliminates ping-pong loops and ensures clean drift resolution.
+
+---
+
+## ADR-008: Multi-Tab Socket Tracking & Room Membership Reconciliation
+- **Context**: In browser watch parties, participants frequently open a second tab or refresh their browser before the TCP socket from the previous page has timed out. Naive socket-to-user 1:1 mappings cause the user to be reported as "offline" when the old tab closes, or cause duplicate participant cards in the UI.
+- **Decision**: Implement a decoupled `ConnectionManager` that maps `(room_code, participant_id) -> Set[socket_id]`.
+- **Consequences**: Opening multiple tabs maintains a single logical participant card displaying `Online (2 tabs)`. Closing one tab keeps the participant online without triggering spurious leave/join events. Only when all socket connections for that participant terminate is an offline status broadcast.
+
+

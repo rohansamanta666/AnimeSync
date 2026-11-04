@@ -35,8 +35,19 @@ graph TD
 - **Why this is critical**: Free tunnels (like Cloudflare) throttle or prohibit live high-bitrate video streaming. By distributing the file once before the watch session, network bandwidth during playback is reduced to a few tiny Socket.IO sync packets (< 1 KB/sec), ensuring zero lag, perfect 1080p/4K visual quality, and immunity to proxy limits.
 
 ### 2.2 Modular Monolith Design
-- **Single ASGI Process**: FastAPI powers both the REST endpoints (chunked uploads, range-based downloads, room management) and the real-time Socket.IO event system.
+- **Single ASGI Process**: FastAPI powers both the REST endpoints (chunked uploads, range-based downloads, room management) and the real-time Socket.IO event system via `socketio.ASGIApp`.
 - **Embedded Static Assets**: In production/self-hosted mode, FastAPI serves the compiled Vite React frontend directly, eliminating the need for a separate reverse proxy or frontend web server.
+
+### 2.3 Real-Time Presence & Connection Tracking
+- **Multi-Tab Resilient Architecture**:
+  AnimeSync separates physical WebSocket connections (`sid`) from logical participant presence. A dedicated thread-safe `ConnectionManager` maintains:
+  - `_sid_to_session`: Maps each active socket ID to its authenticated `SocketSession` (room, participant, username, is_host).
+  - `_participant_sockets`: Maps `(room_code, participant_id)` to a set of active socket IDs. If a user opens a second tab or refreshes their browser, both connections belong to the same logical participant.
+  - Presence State: A participant is marked `is_online = True` as long as `len(sockets) > 0`. When one tab closes, the participant remains online. Only when the final socket closes does the server mark them offline and broadcast `user_left` and `presence_updated`.
+- **Authoritative Room Authentication**:
+  Clients can never claim room membership without providing their cryptographically generated `session_token` upon connecting or emitting `join_room`. Sockets failing database verification are immediately disconnected.
+- **Strict Channel Isolation**:
+  Socket broadcasts use `sio.emit(..., room=room_code)`, guaranteeing that messages and presence events are strictly isolated to authenticated members of that specific room.
 
 ---
 
@@ -206,3 +217,4 @@ graph LR
   - `username`: String
   - `content`: String
   - `created_at`: DateTime
+

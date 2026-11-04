@@ -117,3 +117,4 @@ class RoomManager:
         )
         result = await db.execute(query)
         return result.scalar_one_or_none()
+

@@ -41,3 +41,4 @@ class Participant(Base):
     )
 
     room = relationship("Room", back_populates="participants")
+

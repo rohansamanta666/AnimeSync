@@ -18,3 +18,4 @@ npm run build
 cd "$PROJECT_ROOT"
 
 echo "✅ All AnimeSync test suites passed successfully!"
+

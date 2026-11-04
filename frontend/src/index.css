@@ -41,3 +41,4 @@
 .glass-panel-elevated {
   @apply bg-void-800/90 backdrop-blur-lg border border-void-600 shadow-2xl;
 }
+

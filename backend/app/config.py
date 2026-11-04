@@ -56,3 +56,4 @@ settings = Settings()
 # Ensure storage directories exist
 Path(settings.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
 Path(settings.TEMP_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+

@@ -57,3 +57,4 @@ storage/uploads_temp/*
 # Environment variables
 .env
 .env.local
+
