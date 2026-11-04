@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 from backend.app.database import AsyncSessionLocal
 from backend.app.models.room import Room
 from backend.app.models.participant import Participant, ParticipantStatus
+from backend.app.models.episode import Episode
 from backend.app.sockets.connection_manager import connection_manager
 
 # Create Async Socket.IO Server
@@ -232,3 +233,85 @@ async def leave_room(sid: str, data: dict = None):
 
     await sio.emit("room_left", {"room_code": session.room_code}, to=sid)
     return {"success": True}
+
+@sio.event
+async def verify_file(sid: str, data: dict):
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    episode_id = data.get("episode_id")
+    client_hash = (data.get("sha256_hash") or "").strip().lower()
+    client_size = data.get("file_size_bytes")
+
+    if not episode_id or not client_hash:
+        return {"status": "ERROR", "message": "Missing episode_id or sha256_hash"}
+
+    async with AsyncSessionLocal() as db:
+        # Fetch episode
+        ep_query = select(Episode).where(
+            Episode.id == episode_id,
+            Episode.room_id == session.room_id
+        )
+        ep_res = await db.execute(ep_query)
+        episode = ep_res.scalar_one_or_none()
+
+        if not episode:
+            return {"status": "ERROR", "message": "Episode not found in this room"}
+
+        p_query = select(Participant).where(Participant.id == session.participant_id)
+        p_res = await db.execute(p_query)
+        participant = p_res.scalar_one_or_none()
+        if not participant:
+            return {"status": "ERROR", "message": "Participant not found"}
+
+        server_hash = (episode.sha256_hash or "").strip().lower()
+
+        # Check hash match and size match (if client provided size)
+        hash_matched = (client_hash == server_hash)
+        size_matched = True
+        if client_size is not None and episode.file_size_bytes is not None:
+            size_matched = (int(client_size) == int(episode.file_size_bytes))
+
+        if hash_matched and size_matched:
+            participant.status = ParticipantStatus.VERIFIED
+            participant.verified_file_hash = server_hash
+            await db.commit()
+
+            result_payload = {
+                "status": "VERIFIED",
+                "message": "File verified successfully! Checksum and size match.",
+                "episode_id": episode.id
+            }
+            await sio.emit("verification_result", result_payload, to=sid)
+
+            # Broadcast presence update
+            presence = await connection_manager.get_presence_payload(db, session.room_code)
+            await sio.emit(
+                "presence_updated",
+                {"room_code": session.room_code, "participants": presence},
+                room=session.room_code
+            )
+            return result_payload
+        else:
+            participant.status = ParticipantStatus.VERIFICATION_FAILED
+            participant.verified_file_hash = None
+            await db.commit()
+
+            reason = "Checksum mismatch." if not hash_matched else "File size mismatch."
+            result_payload = {
+                "status": "VERIFICATION_FAILED",
+                "message": f"Verification failed: {reason} The selected file is not identical to the host file.",
+                "episode_id": episode.id,
+                "expected_hash": server_hash,
+                "actual_hash": client_hash
+            }
+            await sio.emit("verification_result", result_payload, to=sid)
+
+            presence = await connection_manager.get_presence_payload(db, session.room_code)
+            await sio.emit(
+                "presence_updated",
+                {"room_code": session.room_code, "participants": presence},
+                room=session.room_code
+            )
+            return result_payload

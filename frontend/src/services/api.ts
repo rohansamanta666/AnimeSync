@@ -1,4 +1,4 @@
-import { HealthInfo, Room, RoomAuth } from '../types';
+import { HealthInfo, Room, RoomAuth, Episode } from '../types';
 
 const API_BASE = '/api';
 
@@ -31,6 +31,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   return response.json();
 }
 
+export interface ChunkUploadProgress {
+  percentage: number;
+  currentChunk: number;
+  totalChunks: number;
+  uploadedBytes: number;
+  totalBytes: number;
+}
+
 export const api = {
   async getHealth(): Promise<HealthInfo> {
     return request<HealthInfo>('/health');
@@ -51,6 +59,115 @@ export const api = {
     return request<RoomAuth>(`/rooms/${code.toUpperCase()}/join`, {
       method: 'POST',
       body: JSON.stringify({ username }),
+    });
+  },
+
+  getDownloadUrl(episodeId: string, participantId: string, sessionToken: string): string {
+    const params = new URLSearchParams({
+      participant_id: participantId,
+      token: sessionToken,
+    });
+    return `${API_BASE}/files/download/${episodeId}?${params.toString()}`;
+  },
+
+  async uploadEpisodeChunked(
+    file: File,
+    metadata: {
+      roomId: string;
+      animeTitle: string;
+      season: number;
+      episodeNumber: number;
+      displayTitle?: string;
+    },
+    auth: { participantId: string; sessionToken: string },
+    onProgress?: (progress: ChunkUploadProgress) => void,
+    signal?: AbortSignal
+  ): Promise<Episode> {
+    const authHeaders = {
+      'X-Participant-ID': auth.participantId,
+      'X-Session-Token': auth.sessionToken,
+    };
+
+    // 1. Initialize upload session
+    const initRes = await request<{ upload_id: string; chunk_size_bytes: number; total_chunks: number }>(
+      '/files/upload/init',
+      {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          room_id: metadata.roomId,
+          filename: file.name,
+          file_size_bytes: file.size,
+          anime_title: metadata.animeTitle,
+          season: metadata.season,
+          episode_number: metadata.episodeNumber,
+          display_title: metadata.displayTitle || null,
+          mime_type: file.type || 'video/mp4',
+        }),
+        signal,
+      }
+    );
+
+    const { upload_id, chunk_size_bytes, total_chunks } = initRes;
+    let uploadedBytes = 0;
+
+    // 2. Upload chunks sequentially (5MB chunks)
+    for (let chunkIndex = 0; chunkIndex < total_chunks; chunkIndex++) {
+      if (signal?.aborted) {
+        throw new Error('Upload aborted by user');
+      }
+
+      const start = chunkIndex * chunk_size_bytes;
+      const end = Math.min(start + chunk_size_bytes, file.size);
+      const chunkBlob = file.slice(start, end);
+
+      const formData = new FormData();
+      formData.append('upload_id', upload_id);
+      formData.append('chunk_index', chunkIndex.toString());
+      formData.append('chunk_file', chunkBlob, `${chunkIndex}.chunk`);
+
+      const chunkRes = await fetch(`${API_BASE}/files/upload/chunk`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: formData,
+        signal,
+      });
+
+      if (!chunkRes.ok) {
+        const errorText = await chunkRes.text();
+        throw new Error(`Failed to upload chunk ${chunkIndex}: ${errorText}`);
+      }
+
+      uploadedBytes += (end - start);
+      if (onProgress) {
+        onProgress({
+          percentage: Math.min(100, Math.round((uploadedBytes / file.size) * 100)),
+          currentChunk: chunkIndex + 1,
+          totalChunks: total_chunks,
+          uploadedBytes,
+          totalBytes: file.size,
+        });
+      }
+    }
+
+    // 3. Finalize upload & calculate authoritative SHA-256
+    const finalizedEpisode = await request<Episode>('/files/upload/complete', {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ upload_id }),
+      signal,
+    });
+
+    return finalizedEpisode;
+  },
+
+  async deleteEpisode(episodeId: string, auth: { participantId: string; sessionToken: string }): Promise<{ success: boolean; freed_bytes: number }> {
+    return request<{ success: boolean; freed_bytes: number }>(`/files/${episodeId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
     });
   },
 };

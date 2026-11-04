@@ -37,45 +37,78 @@ All REST endpoints are prefixed with `/api`.
     }
     ```
 
-### 1.3 File Distribution
+### 1.3 File Distribution & Verification
 - **`POST /api/files/upload/init`**
-  - Header: `Authorization: Bearer <host_token>`
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
   - Body:
     ```json
     {
-      "room_id": "uuid",
+      "room_id": "room-uuid",
       "filename": "frieren_ep01.mp4",
       "file_size_bytes": 734003200,
       "anime_title": "Frieren: Beyond Journey's End",
       "season": 1,
       "episode_number": 1,
-      "display_title": "The End of the Journey"
+      "display_title": "The End of the Journey",
+      "mime_type": "video/mp4"
     }
     ```
-  - Response: `{"upload_id": "upload-uuid", "chunk_size_bytes": 5242880, "total_chunks": 140}`
+  - Response:
+    ```json
+    {
+      "upload_id": "upload-uuid",
+      "chunk_size_bytes": 5242880,
+      "total_chunks": 140,
+      "received_chunks": []
+    }
+    ```
 - **`POST /api/files/upload/chunk`**
-  - Form Data: `upload_id`, `chunk_index`, `chunk_file` (binary blob)
-  - Response: `{"upload_id": "upload-uuid", "chunk_index": 0, "received_bytes": 5242880}`
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
+  - Form Data: `upload_id` (str), `chunk_index` (int), `chunk_file` (binary blob)
+  - Response:
+    ```json
+    {
+      "upload_id": "upload-uuid",
+      "chunk_index": 0,
+      "received_chunks": [0],
+      "total_chunks": 140,
+      "is_complete": false
+    }
+    ```
+- **`GET /api/files/upload/{upload_id}/status`**
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
+  - Response: Upload metadata, list of received chunk indices, and progress fraction for resume coordination.
 - **`POST /api/files/upload/complete`**
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
   - Body: `{"upload_id": "upload-uuid"}`
   - Response:
     ```json
     {
-      "episode_id": "episode-uuid",
+      "id": "episode-uuid",
+      "anime_title": "Frieren: Beyond Journey's End",
+      "season": 1,
+      "episode_number": 1,
+      "display_title": "The End of the Journey",
       "filename": "frieren_ep01.mp4",
-      "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "file_size_bytes": 734003200,
-      "status": "COMPLETED"
+      "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "duration_seconds": null,
+      "upload_status": "COMPLETED",
+      "queue_position": 0
     }
     ```
+- **`POST /api/files/upload/{upload_id}/cancel`**
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
+  - Response: `{"success": true, "message": "Upload cancelled"}`
 - **`GET /api/files/download/{episode_id}`**
-  - Supports HTTP `Range: bytes=start-end` header.
-  - Streaming binary response with `Accept-Ranges: bytes` and `Content-Disposition: attachment; filename="..."`.
-- **`GET /api/files/storage`**
-  - Header: `Authorization: Bearer <host_token>`
-  - Response: Lists stored files, total disk usage, free disk space.
+  - Auth: `Authorization: Bearer <token>` or Query params `?participant_id=<id>&token=<token>`
+  - Header: `Range: bytes=start-end` (Optional)
+  - Response:
+    - 200 OK (Full stream) or 206 Partial Content (Range stream)
+    - Headers: `Accept-Ranges: bytes`, `Content-Range: bytes start-end/total`, `Content-Disposition: attachment; filename="..."`, `X-SHA256: <hash>`
 - **`DELETE /api/files/{episode_id}`**
-  - Header: `Authorization: Bearer <host_token>`
+  - Host only. Purges video from disk and removes database record.
+  - Headers: `X-Participant-ID: <id>`, `X-Session-Token: <token>`
   - Response: `{"success": true, "freed_bytes": 734003200}`
 
 ---
@@ -159,9 +192,35 @@ All REST endpoints are prefixed with `/api`.
 
 ### 2.2 Ready-to-Watch & File Verification
 - **Client $\rightarrow$ Server: `verify_file`**
-  - Payload: `{"episode_id": "uuid", "sha256_hash": "client-computed-hash"}`
-- **Server $\rightarrow$ Client: `verification_result`**
-  - Payload: `{"status": "VERIFIED" | "VERIFICATION_FAILED", "message": "Hash matched perfectly"}`
+  - Payload:
+    ```json
+    {
+      "episode_id": "episode-uuid",
+      "sha256_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "file_size_bytes": 734003200
+    }
+    ```
+- **Server $\rightarrow$ Client (Emitter): `verification_result`**
+  - On Success:
+    ```json
+    {
+      "status": "VERIFIED",
+      "message": "File verified successfully! Checksum and size match.",
+      "episode_id": "episode-uuid"
+    }
+    ```
+  - On Failure:
+    ```json
+    {
+      "status": "VERIFICATION_FAILED",
+      "message": "Verification failed: Checksum mismatch. The selected file is not identical to the host file.",
+      "episode_id": "episode-uuid",
+      "expected_hash": "...",
+      "actual_hash": "..."
+    }
+    ```
+- **Server $\rightarrow$ Room: `presence_updated`**
+  - Broadcasts updated participant list showing newly updated status (`VERIFIED` or `VERIFICATION_FAILED`).
 - **Client $\rightarrow$ Server: `set_ready`**
   - Payload: `{"is_ready": true}`
   - *Enforcement*: Server rejects if participant is not `VERIFIED`.

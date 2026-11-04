@@ -145,3 +145,4 @@ export function useSocket(auth: RoomAuth | null): UseSocketResult {
     reconnect,
   };
 }
+

@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 2 (Private Rooms & Realtime Presence) — **COMPLETED**
-- **Next Phase**: Phase 3 (Video Distribution & File Verification)
+- **Current Phase**: Phase 3 (Video Distribution & File Verification) — **COMPLETED**
+- **Next Phase**: Phase 4 (Ready-to-Watch System)
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -15,8 +15,8 @@
 | :--- | :--- | :--- | :--- |
 | **Phase 1** | Foundation & UI Design System | **COMPLETED** | 100% |
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
-| **Phase 3** | Video Distribution & File Verification | Up Next | 0% |
-| **Phase 4** | Ready-to-Watch System | Pending | 0% |
+| **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
+| **Phase 4** | Ready-to-Watch System | Up Next | 0% |
 | **Phase 5** | Synchronized Video Player | Pending | 0% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
@@ -37,28 +37,51 @@
 - [x] `./scripts/start.sh`, `./scripts/stop.sh`, and `./scripts/test.sh` automation scripts.
 
 ### Phase 2: Private Rooms & Realtime Presence
-- [x] **python-socketio ASGI Integration**: AsyncServer mounted via `socketio.ASGIApp` wrapping FastAPI, supporting both WebSocket transport and HTTP endpoints.
-- [x] **Authoritative Guest Session Authentication**: Sockets connecting to `join_room` must present valid `(room_code, participant_id, session_token)` verified against SQLite. Unauthorized sockets receive `AUTH_FAILED` and are rejected.
-- [x] **Strict Channel Isolation**: Room events broadcast only to authorized participants entered in `sio.enter_room(sid, room_code)`.
-- [x] **Multi-Tab & Duplicate Connection Handling**: Implemented `ConnectionManager` tracking `(room_code, participant_id) -> Set[sid]`. Multiple open tabs represent a single logical user (`Online (2 tabs)`). Disconnecting one tab preserves online state; disconnecting all tabs marks the user offline.
-- [x] **Real-Time Presence Handlers**: `join_room`, `leave_room`, `disconnect`, `user_joined`, `user_left`, `presence_updated`.
-- [x] **Frontend `useSocket` Hook**: Connection state tracking (`connecting`, `connected`, `disconnected`, `reconnecting`, `error`), automatic re-auth on reconnect, and event cleanup.
-- [x] **Live Room Lobby UI**:
-  - Live socket connection status indicator (Realtime Active / Connecting / Offline).
-  - Real-time participant cards with initials avatar, host badge, online pulse indicator, and active tab counts.
-  - Graceful join modal prompt for users opening shared room links.
-  - Real-time error banner with one-click reconnect trigger.
+- [x] `python-socketio` AsyncServer mounted via `socketio.ASGIApp` wrapping FastAPI.
+- [x] Authenticated guest socket sessions validated against database.
+- [x] Strict room channel isolation.
+- [x] Multi-tab connection tracking with `ConnectionManager` (`Online (2 tabs)`).
+- [x] Real-time presence handlers: `join_room`, `leave_room`, `disconnect`, `user_joined`, `user_left`, `presence_updated`.
+- [x] Frontend `useSocket` hook with auto-reconnection and event cleanup.
+- [x] Live Room Lobby UI with connection status and online participant presence.
+
+### Phase 3: Video Distribution & File Verification
+- [x] **5MB Chunked Resumable Upload API**:
+  - `POST /api/files/upload/init`: Prepares upload session, validates file size limits (default 4GB), and calculates chunk count.
+  - `POST /api/files/upload/chunk`: Saves individual 5MB chunks to `storage/uploads_temp/{id}/chunks/`. Bypasses Cloudflare 100MB body cap.
+  - `GET /api/files/upload/{upload_id}/status`: Provides received chunks list for upload resumption.
+  - `POST /api/files/upload/complete`: Validates that all chunks are present, streams chunk assembly sequentially, and creates `Episode` record.
+  - `POST /api/files/upload/{upload_id}/cancel`: Cleans up temp files and frees disk space.
+- [x] **Incremental Server-Side Checksumming**:
+  - Python `hashlib.sha256()` updated incrementally in 64KB blocks during chunk assembly.
+  - Multi-gigabyte videos are never loaded into server RAM.
+- [x] **Resumable Range-Based Download API**:
+  - `GET /api/files/download/{episode_id}` with full HTTP Range request support (`Range: bytes=start-end`).
+  - Streams bytes in 64KB buffers (`206 Partial Content` and `Accept-Ranges: bytes`).
+  - Strict room authorization validation preventing unauthorized cross-room file downloads.
+- [x] **Path Traversal & Unsafe Filename Guards**:
+  - Sanitizes filenames, strips directory components, and restricts files to `storage/videos/`.
+- [x] **Browser-Side Streaming SHA-256 Web Worker**:
+  - Pure TypeScript `StreamingSHA256` implementation running in dedicated `sha256.worker.ts`.
+  - Reads local `File` in 4MB slice buffers; maintains $O(1)$ memory without UI freeze or page crashes.
+  - Verified against Node.js crypto test vectors.
+- [x] **Authoritative Server Verification (`verify_file`)**:
+  - Validates client's computed hash and file size against the server's database record.
+  - Updates participant status to `VERIFIED` on match or `VERIFICATION_FAILED` on mismatch.
+  - Broadcasts updated presence to the room in real time.
+- [x] **Phase 3 Frontend Components**:
+  - `EpisodeUploadModal`: Chunked upload progress bar, chunk counter, and cancellation.
+  - `EpisodeVerificationCard`: Episode metadata, range-request download button, file picker, live Web Worker verification progress bar, and instant verified/mismatch status banners.
 
 ---
 
 ## 4. In-Progress Features
-- Transitioning to **Phase 3: Video Distribution & File Verification**.
+- Transitioning to **Phase 4: Ready-to-Watch System**.
 
 ---
 
 ## 5. Pending Features
-- Phase 3: 5MB chunked video upload, disk storage, range-based download, Web Worker SHA-256 calculation.
-- Phase 4: Ready-to-Watch state machine, verification validation, synchronized countdown.
+- Phase 4: Ready-to-Watch state machine, verification validation, ready/unready toggle, synchronized countdown.
 - Phase 5: HTML5 local video player, server-authoritative sync, adaptive drift correction, buffering recovery.
 - Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
@@ -73,33 +96,28 @@
 ---
 
 ## 7. Tests Performed & Passing
-- `backend/tests/test_rooms.py::test_health_check` — **PASSED**
-- `backend/tests/test_rooms.py::test_spa_serving` — **PASSED**
-- `backend/tests/test_rooms.py::test_room_lifecycle` — **PASSED**
-- `backend/tests/test_presence.py::test_two_participants_join_same_room` — **PASSED**
-- `backend/tests/test_presence.py::test_room_isolation_different_rooms` — **PASSED**
-- `backend/tests/test_presence.py::test_unauthorized_room_access` — **PASSED**
-- `backend/tests/test_presence.py::test_multiple_tabs_and_duplicate_connections` — **PASSED**
-- `backend/tests/test_presence.py::test_unexpected_disconnect_and_reconnection` — **PASSED**
-- `backend/tests/test_presence.py::test_explicit_leave_room` — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2108 modules transformed, 0 errors)
-- Execution of master `./scripts/test.sh` — **PASSED** (All 9 tests + Vite build)
+- `backend/tests/test_rooms.py` (3 tests) — **PASSED**
+- `backend/tests/test_presence.py` (6 tests) — **PASSED**
+- `backend/tests/test_upload.py` (3 tests) — **PASSED**
+  - `test_chunked_upload_assembly_and_sha256`: 3 chunks uploaded, assembled, incremental SHA-256 validated, range download 206 verified, and socket file verification tested.
+  - `test_missing_chunk_finalize_rejection`: Finalize rejected if chunks are missing.
+  - `test_unauthorized_download_prevention`: Cross-room file downloads rejected with 403 Forbidden.
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2111 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 12 backend tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 3 Implementation**:
-  1. Build Chunked Upload API (`/api/files/upload/init`, `/api/files/upload/chunk`, `/api/files/upload/complete`) using 5MB chunks and safe storage in `storage/videos/`.
-  2. Implement server-side incremental SHA-256 hash generation during upload finalization.
-  3. Implement range-based file download endpoint (`/api/files/download/{id}`).
-  4. Build Client-side Upload UI with chunk progress and cancel/resume capability.
-  5. Build Client-side Download UI with byte progress.
-  6. Implement Web Worker streaming SHA-256 calculator for locally selected files.
-  7. Implement `verify_file` socket event for server-authoritative hash validation against database.
+- **Phase 4 Implementation**:
+  1. Formalize authoritative Ready-to-Watch state machine transitions on server.
+  2. Implement `set_ready` / `set_unready` Socket.IO events with strict server-side validation (`status == VERIFIED`).
+  3. Invalidate readiness if episode is replaced or participant selects a different file.
+  4. Implement server-coordinated 3-second synchronized countdown timer (`countdown_started`, `target_start_timestamp`).
+  5. Build Ready-to-Watch UI controls and countdown overlay in frontend.
 
 ---
 
 ## 9. Important Decisions Logged
-- **ADR-008**: Multi-Tab Socket Tracking & Room Membership Reconciliation (`ConnectionManager` tracks `(room_code, participant_id) -> Set[sid]`).
-- Python-SocketIO mounted via `socketio.ASGIApp` wrapping FastAPI, maintaining transparent ASGI 3 pass-through for HTTP endpoints and static SPA delivery.
-- Sockets must authenticate with database-backed session tokens before entering rooms.
+- **Chunked Upload 5MB limit**: Guarantees zero failures over Cloudflare free tunnel proxy.
+- **Incremental SHA-256 in 64KB blocks**: Keeps host RAM consumption at $O(1)$ during video assembly.
+- **Client Web Worker Hashing in 4MB slices**: Guarantees browser main thread remains at 60fps without lag.

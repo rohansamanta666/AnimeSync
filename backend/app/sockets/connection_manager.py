@@ -141,3 +141,4 @@ class ConnectionManager:
 
 # Global connection manager instance
 connection_manager = ConnectionManager()
+

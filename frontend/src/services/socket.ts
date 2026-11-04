@@ -32,3 +32,4 @@ export function closeSocket(): void {
     socketInstance = null;
   }
 }
+

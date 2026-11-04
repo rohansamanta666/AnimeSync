@@ -177,3 +177,4 @@ async def test_explicit_leave_room():
     leave_res = await leave_room("sid_leave")
     assert leave_res["success"] is True
     assert connection_manager.is_participant_online(room.code, host.id) is False
+

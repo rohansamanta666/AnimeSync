@@ -68,36 +68,42 @@ sequenceDiagram
     FrontendHost->>Server: Initialize upload (metadata, expected size)
     loop Upload Chunks (5MB each)
         FrontendHost->>Server: POST /api/files/upload/chunk
-        Server->>Storage: Append chunk to temp file
+        Server->>Storage: Save chunk to storage/uploads_temp/{id}/chunks/
     end
-    Server->>Storage: Finalize assembly & compute server SHA-256
-    Server-->>FrontendHost: Episode ready (ID, SHA-256)
+    FrontendHost->>Server: POST /api/files/upload/complete
+    Server->>Storage: Assemble chunks sequentially & compute SHA-256 via 64KB stream
+    Server-->>FrontendHost: Episode ready (ID, SHA-256, Size)
     Server-)FrontendGuest: Socket: episode_added(episode)
 
     Guest->>FrontendGuest: Click Download Episode
     loop Range Requests
-        FrontendGuest->>Server: GET /api/files/download/{id}
-        Server-->>FrontendGuest: Stream bytes
+        FrontendGuest->>Server: GET /api/files/download/{id} (Range: bytes=start-end)
+        Server-->>FrontendGuest: Stream 64KB blocks (HTTP 206 Partial Content)
     end
     Guest->>FrontendGuest: Select downloaded file via File Picker
-    FrontendGuest->>FrontendGuest: Web Worker calculates SHA-256
-    FrontendGuest->>Server: Socket: verify_file(episode_id, local_hash)
+    FrontendGuest->>FrontendGuest: Web Worker calculates streaming SHA-256 (O(1) RAM)
+    FrontendGuest->>Server: Socket: verify_file(episode_id, local_hash, file_size)
     Server-->>FrontendGuest: Socket: verification_result(status: VERIFIED)
-    Server-)FrontendHost: Socket: participant_status_changed(Guest, VERIFIED)
+    Server-)FrontendHost: Socket: presence_updated(Guest, VERIFIED)
 ```
 
 1. **Chunked Resumable Upload**:
    - Files are split into 5MB chunks client-side using `File.slice()`.
-   - Each chunk has an MD5/index verification and is appended sequentially to disk on the host Mac.
+   - Each chunk has an index verification and is saved in `storage/uploads_temp/{upload_id}/chunks/{chunk_index}.chunk`.
    - Prevents memory bloat and survives Cloudflare's 100MB body limit.
-2. **Server-Side Checksum**:
-   - As chunks are assembled, the backend computes the authoritative SHA-256 hash using Python's `hashlib.sha256()` via incremental chunk reading (64KB buffer).
+   - If network drops, the client queries `/api/files/upload/{upload_id}/status` and resumes from missing chunks.
+2. **Server-Side Incremental Checksumming**:
+   - During finalization, chunks are streamed sequentially into `storage/videos/{episode_id}_{safe_filename}` using 64KB read buffers.
+   - Python's `hashlib.sha256()` is updated on each block, never loading the multi-gigabyte video into RAM.
+   - Assembled byte count is validated against the initial declared size to prevent corrupted or truncated saves.
 3. **Download with HTTP Range Support**:
-   - The file download endpoint supports `Range: bytes=start-end`, enabling browser download managers to resume interrupted downloads.
+   - The file download endpoint supports `Range: bytes=start-end`, enabling browser download managers to pause and resume.
+   - Returns `HTTP 206 Partial Content` with `Content-Range: bytes start-end/total` and `Accept-Ranges: bytes`.
 4. **Client-Side Web Worker Checksumming**:
-   - Browser computes SHA-256 incrementally in a dedicated background `Worker` using chunks read via `FileReader` / Web Crypto API.
-   - The main UI thread never freezes.
-   - The server validates the client's computed hash against the stored database record.
+   - Browser computes SHA-256 incrementally in a dedicated background `Worker` (`sha256.worker.ts`).
+   - Uses `StreamingSHA256` in 4MB slice buffers, maintaining $O(1)$ memory.
+   - Main UI thread remains 60fps responsive without stuttering or "Page Unresponsive" warnings.
+   - The server validates the client's computed hash and size against the authoritative database record.
 
 ---
 

@@ -11,14 +11,18 @@ import {
   ShieldCheck,
   AlertCircle,
   RefreshCw,
+  Plus,
+  Upload,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
-import { Room, RoomAuth, ParticipantPresence } from '../types';
+import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
 import { useSocket } from '../hooks/useSocket';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { JoinRoomModal } from '../components/room/JoinRoomModal';
+import { EpisodeUploadModal } from '../components/file/EpisodeUploadModal';
+import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationCard';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -30,6 +34,7 @@ export const RoomPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   // Load saved session on mount
   useEffect(() => {
@@ -62,6 +67,7 @@ export const RoomPage: React.FC = () => {
 
   // Connect via real-time WebSocket hook
   const {
+    socket,
     connectionStatus,
     presence,
     roomSnapshot,
@@ -71,6 +77,32 @@ export const RoomPage: React.FC = () => {
 
   // Authoritative current room data (prefer real-time snapshot when available)
   const room = roomSnapshot || initialRoom;
+
+  // Listen for socket events: episode added and verification result
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleEpisodeAdded = (data: { episode: Episode }) => {
+      setInitialRoom((prev) => {
+        if (!prev) return prev;
+        const exists = prev.episodes.some((e) => e.id === data.episode.id);
+        const updatedList = exists
+          ? prev.episodes.map((e) => (e.id === data.episode.id ? data.episode : e))
+          : [data.episode, ...prev.episodes];
+        return {
+          ...prev,
+          current_episode_id: prev.current_episode_id || data.episode.id,
+          episodes: updatedList,
+        };
+      });
+    };
+
+    socket.on('episode_added', handleEpisodeAdded);
+
+    return () => {
+      socket.off('episode_added', handleEpisodeAdded);
+    };
+  }, [socket]);
 
   // Handle invitation link copying
   const handleCopyLink = () => {
@@ -128,6 +160,9 @@ export const RoomPage: React.FC = () => {
   const currentParticipant = auth
     ? activeParticipants.find((p) => p.id === auth.participant_id)
     : null;
+
+  // Active current episode (if any)
+  const currentEpisode = room.episodes.find((e) => e.id === room.current_episode_id) || room.episodes[0] || null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -221,22 +256,37 @@ export const RoomPage: React.FC = () => {
 
       {/* Main Room Layout Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Watch Stage / Video Area (2 Cols) */}
+        {/* Watch Stage & Verification Area (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
           <Card variant="elevated" className="p-0 overflow-hidden border-void-600/80">
-            {/* Video Player Display Placeholder */}
+            {/* Video Stage Placeholder / Display */}
             <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
               <div className="w-20 h-20 rounded-2xl bg-void-800/80 border border-void-600/80 flex items-center justify-center mb-4 shadow-xl">
                 <Film className="w-8 h-8 text-violet-400" />
               </div>
               <h3 className="text-lg font-bold text-white mb-1">
-                {room.episodes.length > 0 ? room.episodes[0].anime_title : 'No Episode Loaded'}
+                {currentEpisode ? currentEpisode.anime_title : 'No Episode Loaded'}
               </h3>
               <p className="text-xs text-ink-muted max-w-md">
-                {auth?.is_host
+                {currentEpisode
+                  ? 'Verify your local video file below before entering the synchronized watch room.'
+                  : auth?.is_host
                   ? 'Upload an anime episode below to start the verification and watch party.'
-                  : 'Waiting for the host to upload or select an episode.'}
+                  : 'Waiting for the host to upload an episode.'}
               </p>
+
+              {auth?.is_host && !currentEpisode && (
+                <div className="mt-5">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    leftIcon={<Upload className="w-4 h-4" />}
+                    onClick={() => setShowUploadModal(true)}
+                  >
+                    Upload Anime Episode
+                  </Button>
+                </div>
+              )}
             </div>
 
             {/* Ready-to-Watch Bar */}
@@ -249,6 +299,16 @@ export const RoomPage: React.FC = () => {
               </div>
 
               <div className="flex items-center gap-2">
+                {auth?.is_host && currentEpisode && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<Plus className="w-4 h-4" />}
+                    onClick={() => setShowUploadModal(true)}
+                  >
+                    Upload Another
+                  </Button>
+                )}
                 <Button
                   variant="primary"
                   size="sm"
@@ -260,9 +320,27 @@ export const RoomPage: React.FC = () => {
               </div>
             </div>
           </Card>
+
+          {/* Phase 3: Video Distribution & Verification Card */}
+          {currentEpisode && auth && (
+            <EpisodeVerificationCard
+              episode={currentEpisode}
+              auth={auth}
+              participantStatus={currentParticipant?.status}
+              onSendVerificationSocket={(epId, hash, size) => {
+                if (socket) {
+                  socket.emit('verify_file', {
+                    episode_id: epId,
+                    sha256_hash: hash,
+                    file_size_bytes: size,
+                  });
+                }
+              }}
+            />
+          )}
         </div>
 
-        {/* Sidebar: Real-time Participants & Presence (1 Col) */}
+        {/* Sidebar: Real-time Participants & Info (1 Col) */}
         <div className="space-y-6">
           <Card variant="default">
             <div className="flex items-center justify-between pb-3 border-b border-void-700/60 mb-4">
@@ -345,6 +423,25 @@ export const RoomPage: React.FC = () => {
           </Card>
         </div>
       </div>
+
+      {/* Upload Modal (Host Only) */}
+      {auth && (
+        <EpisodeUploadModal
+          isOpen={showUploadModal}
+          onClose={() => setShowUploadModal(false)}
+          auth={auth}
+          onEpisodeUploaded={(ep) => {
+            setInitialRoom((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                current_episode_id: prev.current_episode_id || ep.id,
+                episodes: [ep, ...prev.episodes.filter((e) => e.id !== ep.id)],
+              };
+            });
+          }}
+        />
+      )}
 
       {/* Guest Join Modal if visiting from invite link */}
       {showJoinModal && (
