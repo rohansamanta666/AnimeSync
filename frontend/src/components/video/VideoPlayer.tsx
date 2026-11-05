@@ -35,8 +35,11 @@ import {
   Film,
   AlertCircle,
   SlidersHorizontal,
+  RefreshCw,
 } from 'lucide-react';
 import { Button } from '../common/Button';
+import { SyncHealthBadge } from './SyncHealthBadge';
+import { SyncStatusState } from '../../services/drift';
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -71,6 +74,12 @@ export interface VideoPlayerProps {
   onBufferingStart?: () => void;
   onBufferingEnd?: () => void;
   bufferingParticipants?: string[];
+  /** Phase 5 Task 5.6: Manual Resync & Sync Health Diagnostics */
+  onResync?: () => void;
+  isResyncing?: boolean;
+  syncStatus?: SyncStatusState;
+  latencyMs?: number | null;
+  driftSeconds?: number;
   /** Custom outer container class */
   className?: string;
 }
@@ -110,6 +119,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onBufferingStart,
       onBufferingEnd,
       bufferingParticipants,
+      onResync,
+      isResyncing,
+      syncStatus,
+      latencyMs,
+      driftSeconds,
       className = '',
     },
     ref
@@ -368,11 +382,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             e.preventDefault();
             toggleFullscreen();
             break;
+          case 'KeyR':
+            if (e.shiftKey && onResync) {
+              e.preventDefault();
+              onResync();
+            }
+            break;
           default:
             break;
         }
       },
-      [togglePlay, currentTime, volume, duration]
+      [togglePlay, currentTime, volume, duration, onResync]
     );
 
     // 7. Progress scrubber click / drag
@@ -601,6 +621,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               • {file.name}
             </span>
           </div>
+
+          {/* Sync Health Badge in Top Overlay */}
+          {syncStatus && onResync && (
+            <SyncHealthBadge
+              status={syncStatus}
+              driftSeconds={driftSeconds ?? 0}
+              latencyMs={latencyMs ?? null}
+              isResyncing={!!isResyncing}
+              onResync={onResync}
+              compact
+            />
+          )}
         </div>
 
         {/* Bottom Custom Controls Overlay (Auto-hides) */}
@@ -743,6 +775,18 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                   </div>
                 )}
               </div>
+
+              {/* Manual Resync Button */}
+              {onResync && (
+                <button
+                  onClick={onResync}
+                  disabled={isResyncing}
+                  className="p-1.5 rounded-lg hover:bg-white/10 text-ink-muted hover:text-cyan-300 transition-colors disabled:opacity-50"
+                  title="Manual Resync: align with authoritative server timestamp (Shift+R)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin text-cyan-400' : ''}`} />
+                </button>
+              )}
 
               {/* Fullscreen Button */}
               <button

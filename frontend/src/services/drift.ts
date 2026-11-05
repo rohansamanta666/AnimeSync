@@ -182,3 +182,62 @@ export function evaluateDriftCorrection(params: EvaluateDriftParams): DriftEvalu
     authoritativeTime: authTime,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 Task 5.6: Sync Health Status & Resync Helpers
+// ---------------------------------------------------------------------------
+
+export type SyncStatusState = 'SYNCED' | 'NUDGING' | 'BUFFERING' | 'PAUSED';
+
+export interface DetermineSyncStatusParams {
+  isRoomBuffering: boolean;
+  isLocalBuffering?: boolean;
+  isNudging: boolean;
+  isPaused: boolean;
+  driftSeconds: number;
+}
+
+/**
+ * Determines high-level sync health status for UI badges and diagnostics.
+ */
+export function determineSyncStatus(params: DetermineSyncStatusParams): SyncStatusState {
+  if (params.isRoomBuffering || params.isLocalBuffering) {
+    return 'BUFFERING';
+  }
+  if (params.isNudging) {
+    return 'NUDGING';
+  }
+  if (params.isPaused) {
+    return 'PAUSED';
+  }
+  return 'SYNCED';
+}
+
+/**
+ * Computes ping round-trip latency in milliseconds.
+ */
+export function computePingLatency(clientSendTime: number, clientReceiveTime: number): number {
+  return Math.max(0, Math.round(clientReceiveTime - clientSendTime));
+}
+
+export interface ResyncTarget {
+  targetTime: number;
+  targetRate: number;
+  isPlaying: boolean;
+}
+
+/**
+ * Calculates authoritative alignment target for manual Resync.
+ */
+export function calculateResyncTarget(
+  snapshot: AuthoritativePlaybackSnapshot,
+  nowSeconds?: number
+): ResyncTarget {
+  const targetTime = computeAuthoritativeTime(snapshot, nowSeconds);
+  return {
+    targetTime,
+    targetRate: snapshot.playbackSpeed || 1.0,
+    isPlaying: snapshot.isPlaying,
+  };
+}
+

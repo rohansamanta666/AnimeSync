@@ -1035,3 +1035,22 @@ async def buffering_end(sid: str, data: dict = None):
     }
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.6: Ping Check & Latency Measurement
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def ping_check(sid: str, data: dict = None):
+    """
+    Heartbeat ping handler. Returns client_time and server_time
+    so the client can calculate exact round-trip latency in milliseconds.
+    """
+    client_time = (data or {}).get("client_time")
+    return {
+        "status": "OK",
+        "client_time": client_time,
+        "server_time": time.time(),
+    }
+
+
+

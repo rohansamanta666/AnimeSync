@@ -48,6 +48,7 @@ from backend.app.sockets.server import (
     buffering_start,
     buffering_end,
     disconnect,
+    ping_check,
     sio,
 )
 
@@ -761,6 +762,119 @@ async def test_socket_buffering_unverified_rejected():
     assert "cannot participate in buffering sync" in res["message"]
 
     await connection_manager.unregister_connection(sid)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.6: Ping Latency & Manual Resync Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ping_check_latency_measurement():
+    """ping_check socket handler echoes client timestamp and returns server time."""
+    client_send_ms = 1730000000123
+    res = await ping_check("any_sid", {"client_time": client_send_ms})
+    assert res["status"] == "OK"
+    assert res["client_time"] == client_send_ms
+    assert isinstance(res["server_time"], float)
+    assert res["server_time"] > 0
+
+
+@pytest.mark.asyncio
+async def test_manual_resync_alignment_playing():
+    """Manual Resync while playing returns authoritative time and active playing status."""
+    room = await _make_room("Resync Play Room")
+    p1 = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room.id, "Friend", ParticipantStatus.WATCHING)
+
+    sid1 = "sid_resync_h"
+    sid2 = "sid_resync_f"
+    await connection_manager.register_connection(
+        sid=sid1, room_code=room.code, room_id=room.id,
+        participant_id=p1.id, username="Host", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid2, room_code=room.code, room_id=room.id,
+        participant_id=p2.id, username="Friend", is_host=False
+    )
+
+    # Host starts playback at 40.0s
+    await playback_action(sid1, {"action": "PLAY", "timestamp": 40.0})
+
+    # Friend performs manual Resync via get_playback_state
+    res = await get_playback_state(sid2, {})
+    assert res["status"] == "OK"
+    state = res["state"]
+    assert state["is_playing"] is True
+    assert state["current_time"] >= 40.0
+    assert state["playback_speed"] == 1.0
+    assert state["paused_for_buffering"] is False
+    assert state["sequence_number"] == 1
+
+    await connection_manager.unregister_connection(sid1)
+    await connection_manager.unregister_connection(sid2)
+
+
+@pytest.mark.asyncio
+async def test_manual_resync_alignment_paused():
+    """Manual Resync while paused returns exact static position and is_playing=False."""
+    room = await _make_room("Resync Pause Room")
+    p = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    sid = "sid_resync_pause"
+    await connection_manager.register_connection(
+        sid=sid, room_code=room.code, room_id=room.id,
+        participant_id=p.id, username="Host", is_host=True
+    )
+
+    # Play then pause at 15.5s
+    await playback_action(sid, {"action": "PLAY", "timestamp": 10.0})
+    await playback_action(sid, {"action": "PAUSE", "timestamp": 15.5})
+
+    # Resync query
+    res = await get_playback_state(sid, {})
+    assert res["status"] == "OK"
+    state = res["state"]
+    assert state["is_playing"] is False
+    assert state["current_time"] == 15.5
+    assert state["paused_for_buffering"] is False
+
+    await connection_manager.unregister_connection(sid)
+
+
+@pytest.mark.asyncio
+async def test_manual_resync_alignment_buffering_preservation():
+    """Manual Resync while room is paused for buffering preserves paused_for_buffering flag."""
+    room = await _make_room("Resync Buf Room")
+    p1 = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room.id, "Friend", ParticipantStatus.WATCHING)
+
+    sid1 = "sid_buf_resync_h"
+    sid2 = "sid_buf_resync_f"
+    await connection_manager.register_connection(
+        sid=sid1, room_code=room.code, room_id=room.id,
+        participant_id=p1.id, username="Host", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid2, room_code=room.code, room_id=room.id,
+        participant_id=p2.id, username="Friend", is_host=False
+    )
+
+    # Start playback
+    await playback_action(sid1, {"action": "PLAY", "timestamp": 25.0})
+
+    # Friend buffers -> shared pause
+    await buffering_start(sid2, {"room_code": room.code})
+
+    # Host triggers manual Resync while friend is buffering
+    res = await get_playback_state(sid1, {})
+    assert res["status"] == "OK"
+    state = res["state"]
+    assert state["is_playing"] is False
+    assert state["paused_for_buffering"] is True
+    # Crucial: local player will remain paused because paused_for_buffering is True
+
+    await connection_manager.unregister_connection(sid1)
+    await connection_manager.unregister_connection(sid2)
+
 
 
 

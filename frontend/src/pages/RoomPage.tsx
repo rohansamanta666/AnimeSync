@@ -29,6 +29,7 @@ import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationC
 import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
 import { VideoPlayer, VideoPlayerHandle } from '../components/video/VideoPlayer';
+import { SyncHealthBadge } from '../components/video/SyncHealthBadge';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -130,12 +131,14 @@ export const RoomPage: React.FC = () => {
     handlePlaybackRateChange,
     handleBufferingStart,
     handleBufferingEnd,
+    handleResync,
     currentSequence,
     lastAction,
     driftSeconds,
-    isNudging,
     bufferingParticipants,
-    isRoomBuffering,
+    latencyMs,
+    isResyncing,
+    syncStatus,
   } = useVideoSync({
     socket,
     playerRef: videoPlayerRef,
@@ -354,6 +357,11 @@ export const RoomPage: React.FC = () => {
                 onBufferingStart={handleBufferingStart}
                 onBufferingEnd={handleBufferingEnd}
                 bufferingParticipants={bufferingParticipants}
+                onResync={handleResync}
+                isResyncing={isResyncing}
+                syncStatus={syncStatus}
+                latencyMs={latencyMs}
+                driftSeconds={driftSeconds}
               />
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
@@ -396,32 +404,28 @@ export const RoomPage: React.FC = () => {
               )}
 
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-ink-muted">Your Status:</span>
                     <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
                   </div>
+
+                  {/* Phase 5 Task 5.6: Sync Health Diagnostics & Resync Trigger */}
+                  {currentEpisode && (
+                    <SyncHealthBadge
+                      status={syncStatus}
+                      driftSeconds={driftSeconds}
+                      latencyMs={latencyMs}
+                      isResyncing={isResyncing}
+                      onResync={handleResync}
+                    />
+                  )}
+
                   {/* Realtime Sync Status Indicator */}
                   {currentSequence > 0 && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-void-800 text-cyan-300 border border-void-600 flex items-center gap-1.5 shadow-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                      <span>Sync #{currentSequence} {lastAction ? `(${lastAction})` : ''}</span>
-                    </span>
-                  )}
-                  {/* Adaptive Drift Correction Status Indicator */}
-                  {isNudging && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 flex items-center gap-1.5 shadow-sm animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                      <span>Syncing drift ({Math.round(driftSeconds * 1000)}ms)</span>
-                    </span>
-                  )}
-                  {/* Buffering Coordination Status Indicator */}
-                  {isRoomBuffering && (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950/80 text-violet-300 border border-violet-800/80 flex items-center gap-1.5 shadow-sm animate-pulse">
-                      <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
-                      <span>
-                        Buffering: {bufferingParticipants.length > 0 ? bufferingParticipants.join(', ') : 'Waiting...'}
-                      </span>
+                      <span>Seq #{currentSequence} {lastAction ? `(${lastAction})` : ''}</span>
                     </span>
                   )}
                   {/* Countdown preview in bar when active */}

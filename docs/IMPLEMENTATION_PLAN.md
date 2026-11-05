@@ -60,7 +60,11 @@ This document outlines the execution roadmap across all 9 phases, specifying del
   - Server-coordinated shared pause when any active participant buffers.
   - Resume only when all active participants are ready.
   - Automatic disconnect recovery and feedback loop prevention.
-- [ ] Task 5.6: Implement manual "Resync" button and Sync Health status indicator (latency, drift ms, sync status).
+- [x] Task 5.6: Implement manual "Resync" button and Sync Health status indicator:
+  - Add Resync button to video player overlay and room header.
+  - One-click authoritative alignment via `calculateResyncTarget`.
+  - Live round-trip network latency measurement via `ping_check` Socket.IO event.
+  - Live Sync Health badge showing Synced, Nudging, Buffering, Paused.
 - [ ] Task 5.7: Test playback sync under simulated latency and packet drops.
 
 ---

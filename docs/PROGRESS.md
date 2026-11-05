@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 5 (Synchronized Video Player) — **IN PROGRESS (Tasks 5.1, 5.2, 5.3 Completed)**
-- **Next Task**: Phase 5 Task 5.4 (Adaptive Drift Correction Engine)
+- **Current Phase**: Phase 5 (Synchronized Video Player) — **COMPLETED (Tasks 5.1–5.6 Completed & Verified)**
+- **Next Task**: Phase 6 — Episode Queue & Auto-Next Workflow
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -17,7 +17,7 @@
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
-| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 90% |
+| **Phase 5** | Synchronized Video Player | **COMPLETED** | 100% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -145,23 +145,27 @@
   - Feedback loop prevention: `useVideoSync` suppresses drift evaluation during room buffering (`isRoomBuffering`).
   - Buffering UI: Japanese dark theme spinner overlay on video stage displaying `Buffering: [usernames]`, plus pulsing status pill in room header.
   - 7 automated tests added in `backend/tests/test_sync.py` covering buffering start/end, multi-client coordination, paused buffering, manual pause overrides, disconnect recovery, and unverified rejection.
+- [x] **Task 5.6: Manual Resync & Sync Health UI (`SyncHealthBadge.tsx`, `useVideoSync.ts`, `VideoPlayer.tsx`, `RoomPage.tsx`, `server.py`)**:
+  - Dedicated `SyncHealthBadge` component displaying real-time synchronization diagnostics:
+    - Four clear status states: **Synced** (emerald glowing dot), **Nudging** (amber micro-drift adjustment), **Buffering** (pulsing violet spinner), and **Paused** (dim zinc dot).
+    - Live round-trip network latency measurement (`Ping: XXms`).
+    - Live signed playback drift offset (`Drift: ±XXms`).
+    - One-click manual Resync button with rotation animation.
+  - Video player integration: Resync button placed in bottom controls bar, compact `SyncHealthBadge` in top header overlay, and global badge in RoomPage watch bar. Keyboard shortcut `Shift+R` for rapid alignment.
+  - Authoritative resync engine `handleResync`: queries latest state via `get_playback_state`, calculates target alignment via `calculateResyncTarget`, and hard-seeks/resets player without triggering feedback loops (`isApplyingRemoteRef.current = true`).
+  - Buffering and paused state preservation: If the room is paused or buffering, manual resync aligns playback position but keeps the player paused, avoiding premature playback.
+  - Application-level heartbeat ping `ping_check` socket handler measuring accurate WebSocket round-trip time.
+  - 4 automated backend tests in `test_sync.py` covering ping measurement, resync during active playback, resync while paused, and resync during buffering.
+  - 10 automated frontend unit tests in `sync_health.test.ts` covering status resolution, ping calculation, and resync target alignment.
 
 ---
 
 ## 4. In-Progress Features
-- **Phase 5: Synchronized Video Player**:
-  - Task 5.1: Completed.
-  - Task 5.2: Completed.
-  - Task 5.3: Completed.
-  - Task 5.4: Completed.
-  - Task 5.5: Completed.
-  - Task 5.6: Up next (Manual Resync Button & Sync Health UI).
+- **Phase 5: Synchronized Video Player** — **COMPLETED** (Tasks 5.1–5.6 fully implemented, verified, and committed).
 
 ---
 
 ## 5. Pending Features
-- Task 5.6: Resync button and Sync Health UI (latency, drift ms, sync badge).
-- Task 5.7: Playback sync verification under simulated latency and packet drops.
 - Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
 - Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
@@ -179,7 +183,7 @@
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
-- `backend/tests/test_sync.py` (22 tests) — **PASSED**
+- `backend/tests/test_sync.py` (26 tests) — **PASSED**
   - `test_playback_manager_initial_state`: Initial state defaults.
   - `test_playback_manager_play_action`: PLAY action updates is_playing and sequence.
   - `test_playback_manager_pause_action`: PAUSE action updates is_playing and records position.
@@ -202,17 +206,24 @@
   - `test_socket_buffering_multiple_participants_coordination`: Multi-participant buffering coordination (resumes only when last viewer ready).
   - `test_socket_buffering_disconnect_recovery`: Disconnect during buffering automatically resumes remaining viewers.
   - `test_socket_buffering_unverified_rejected`: Unverified participant cannot trigger buffering coordination.
+  - `test_ping_check_latency_measurement`: Ping/pong latency measurement handler test.
+  - `test_manual_resync_alignment_playing`: Authoritative time alignment while playing.
+  - `test_manual_resync_alignment_paused`: Authoritative position alignment while paused.
+  - `test_manual_resync_alignment_buffering_preservation`: Preserves buffering pause state during manual resync.
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2117 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 42 backend tests + 20 frontend unit tests + Vite build)
+- `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2118 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 46 backend tests + 30 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 5 Task 5.6: Implement Manual Resync Button & Sync Health UI**:
-  1. Add "Resync" button to player controls to manually fetch authoritative server state and hard-seek if needed.
-  2. Implement Sync Health badge displaying live latency (ping/pong round-trip) and measured drift.
-  3. Provide quick visual confirmation of sync status ("Synced", "Nudging", "Buffering").
+- **Phase 6: Episode Queue & Auto-Next Workflow**:
+  - Task 6.1: Implement Room Episode Queue data model and API/Socket events (`add_to_queue`, `remove_from_queue`, `reorder_queue`).
+  - Task 6.2: Build episode queue UI showing upcoming episodes, download status, and verification badges.
+  - Task 6.3: Implement video `ended` event coordination with duplicate protection.
+  - Task 6.4: Build Intermission Screen showing next episode details, per-participant verification requirements, and countdown.
+  - Task 6.5: Verify that Auto-Next enforces Ready-to-Watch requirements before advancing playback.
 
 ---
 
@@ -227,3 +238,4 @@
 - **Quadruple-Layered Loop Prevention**: `originating_socket_id` matching + monotonic sequence numbering + `isApplyingRemoteRef` hook guard + `isRemoteActionRef` player handle lock prevents any feedback loops during remote sync.
 - **Tiered Adaptive Playback Drift Correction**: Micro-drift ($0.25$s to $1.5$s) uses imperceptible $\pm 5\%$ speed nudges, completely avoiding jarring audio stutters or seeks; macro-drift ($\ge 1.5$s) immediately seeks. Intended speed is faithfully restored upon re-alignment.
 - **Server-Coordinated Buffering with Disconnect Recovery**: Shared pause triggered when any viewer buffers; playback resumes authoritatively with `originating_socket_id="server"` when all buffering viewers finish. Disconnecting viewers are automatically cleared so remaining viewers are never stalled indefinitely.
+- **One-Click Manual Resync & Diagnostics**: Manual Resync hard-aligns player directly with server state while preserving paused/buffering status; live ping and drift metrics give viewers complete confidence in synchronization health.

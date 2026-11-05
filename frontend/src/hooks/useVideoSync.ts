@@ -1,8 +1,8 @@
 /**
- * useVideoSync — Phase 5 Tasks 5.3, 5.4 & 5.5
+ * useVideoSync — Phase 5 Tasks 5.3, 5.4, 5.5 & 5.6
  *
  * Client-to-Server Playback Controls, Sequence Number Loop Prevention,
- * Adaptive Playback Drift Correction, and Buffering Detection & Recovery.
+ * Adaptive Playback Drift Correction, Buffering Detection, and Manual Resync & Sync Health.
  *
  * Task 5.3:
  * - Connects VideoPlayer controls (Play, Pause, Seek, Rate Change) to backend `playback_action`.
@@ -15,8 +15,6 @@
  * - 2-second periodic drift evaluation while playback is active.
  * - Drift < 0.25s: Within tolerance (restores intended rate if nudging was active).
  * - Drift [0.25s, 1.5s): Micro-drift -> ±5% temporary playback speed adjustment.
- *   - Behind (drift < 0) -> +5% speed up (intendedRate * 1.05)
- *   - Ahead (drift > 0) -> -5% slow down (intendedRate * 0.95)
  * - Drift >= 1.5s: Macro-drift -> hard seek directly to authoritative position.
  * - Paused playback: Does not adjust rate when paused.
  *
@@ -26,7 +24,11 @@
  * - Server-coordinated shared pause when any participant buffers.
  * - Listens for buffering_update to track active buffering participants.
  * - Automatic resume only when all participants have finished buffering.
- * - Drift evaluation inhibited during room buffering to prevent feedback loops.
+ *
+ * Task 5.6:
+ * - Manual Resync: Queries authoritative server playback state and hard-aligns local player without feedback loops.
+ * - Latency ping: Periodically measures Socket.IO round-trip latency in milliseconds.
+ * - Live Sync Health status: Synced, Nudging, Buffering, Paused.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
@@ -34,7 +36,11 @@ import { PlaybackActionType, PlaybackSyncPayload, BufferingUpdatePayload } from 
 import { VideoPlayerHandle } from '../components/video/VideoPlayer';
 import {
   evaluateDriftCorrection,
+  determineSyncStatus,
+  computePingLatency,
+  calculateResyncTarget,
   AuthoritativePlaybackSnapshot,
+  SyncStatusState,
   DRIFT_CHECK_INTERVAL_MS,
   DRIFT_ACTION_COOLDOWN_MS,
 } from '../services/drift';
@@ -59,6 +65,8 @@ export interface UseVideoSyncResult {
   handleBufferingStart: () => void;
   /** Local buffering ended callback to pass to VideoPlayer */
   handleBufferingEnd: () => void;
+  /** Manual Resync trigger to align with server authoritative state */
+  handleResync: () => void;
   /** Monotonic server sequence number of the most recently applied action */
   currentSequence: number;
   /** Most recent applied playback action */
@@ -71,6 +79,12 @@ export interface UseVideoSyncResult {
   bufferingParticipants: string[];
   /** Whether the room is currently paused waiting for buffering to resolve */
   isRoomBuffering: boolean;
+  /** Live round-trip network latency in milliseconds */
+  latencyMs: number | null;
+  /** Whether a manual Resync alignment is currently in progress */
+  isResyncing: boolean;
+  /** High-level sync health status for badge display */
+  syncStatus: SyncStatusState;
 }
 
 export function useVideoSync({
@@ -85,6 +99,8 @@ export function useVideoSync({
   const [isNudging, setIsNudging] = useState<boolean>(false);
   const [bufferingParticipants, setBufferingParticipants] = useState<string[]>([]);
   const [isRoomBuffering, setIsRoomBuffering] = useState<boolean>(false);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
+  const [isResyncing, setIsResyncing] = useState<boolean>(false);
 
   // Highest sequence number applied so far (avoids out-of-order or duplicate updates)
   const lastAppliedSequenceRef = useRef<number>(0);
@@ -221,6 +237,95 @@ export function useVideoSync({
     });
   }, [socket, isEnabled, roomCode, playerRef]);
 
+  // Network round-trip latency measurement (Task 5.6)
+  const measureLatency = useCallback(() => {
+    if (!socket) return;
+    const sendTime = Date.now();
+    socket.emit('ping_check', { client_time: sendTime }, (res: { client_time?: number }) => {
+      const receiveTime = Date.now();
+      const rtt = computePingLatency(res?.client_time ?? sendTime, receiveTime);
+      setLatencyMs(rtt);
+    });
+  }, [socket]);
+
+  // Periodic ping heartbeat (every 5 seconds)
+  useEffect(() => {
+    if (!socket || !isEnabled) return;
+    measureLatency();
+    const pingInterval = setInterval(measureLatency, 5000);
+    return () => clearInterval(pingInterval);
+  }, [socket, isEnabled, measureLatency]);
+
+  // Manual Resync Action (Task 5.6)
+  const handleResync = useCallback(() => {
+    if (!socket || !isEnabled || !roomCode) return;
+    setIsResyncing(true);
+    isApplyingRemoteRef.current = true;
+
+    socket.emit(
+      'get_playback_state',
+      {},
+      (res: {
+        status?: string;
+        state?: {
+          is_playing?: boolean;
+          current_time?: number;
+          playback_speed?: number;
+          updated_at?: number;
+          sequence_number?: number;
+          paused_for_buffering?: boolean;
+        };
+      }) => {
+        const nowMs = Date.now();
+        if (res?.status === 'OK' && res.state) {
+          const st = res.state;
+          const isPlaying = !!st.is_playing;
+          const isPausedForBuffering = !!st.paused_for_buffering;
+          const rate = typeof st.playback_speed === 'number' ? st.playback_speed : 1.0;
+          const incomingSeq = st.sequence_number ?? 0;
+          const updatedAt = typeof st.updated_at === 'number' ? st.updated_at : nowMs / 1000;
+          const currentTime = typeof st.current_time === 'number' ? st.current_time : 0;
+
+          const snapshot: AuthoritativePlaybackSnapshot = {
+            isPlaying,
+            currentTime,
+            playbackSpeed: rate,
+            updatedAt,
+            serverSequence: incomingSeq,
+            localReceivedAt: nowMs,
+          };
+          authoritativeSnapshotRef.current = snapshot;
+          userPlaybackRateRef.current = rate;
+          isNudgingRef.current = false;
+          setIsNudging(false);
+
+          const player = playerRef.current;
+          if (player) {
+            const target = calculateResyncTarget(snapshot, nowMs / 1000);
+            player.seek(target.targetTime);
+            player.setPlaybackRate(target.targetRate);
+
+            if (target.isPlaying && !isPausedForBuffering && !isRoomBuffering) {
+              player.play().catch((err) => console.warn('Resync play error:', err));
+            } else {
+              player.pause();
+            }
+          }
+
+          lastAppliedSequenceRef.current = incomingSeq;
+          setCurrentSequence(incomingSeq);
+          lastActionTimeRef.current = nowMs;
+          measureLatency();
+        }
+
+        setTimeout(() => {
+          isApplyingRemoteRef.current = false;
+          setIsResyncing(false);
+        }, 180);
+      }
+    );
+  }, [socket, isEnabled, roomCode, playerRef, isRoomBuffering, measureLatency]);
+
   // 2. Fetch initial playback state when enabled
   useEffect(() => {
     if (!socket || !isEnabled) return;
@@ -228,7 +333,16 @@ export function useVideoSync({
     socket.emit(
       'get_playback_state',
       {},
-      (res: { status?: string; state?: { is_playing?: boolean; current_time?: number; playback_speed?: number; updated_at?: number; sequence_number?: number } }) => {
+      (res: {
+        status?: string;
+        state?: {
+          is_playing?: boolean;
+          current_time?: number;
+          playback_speed?: number;
+          updated_at?: number;
+          sequence_number?: number;
+        };
+      }) => {
         if (res?.status === 'OK' && res.state) {
           const st = res.state;
           const rate = typeof st.playback_speed === 'number' ? st.playback_speed : 1.0;
@@ -411,7 +525,7 @@ export function useVideoSync({
     };
   }, [socket, isEnabled, playerRef, roomCode]);
 
-  // 4. Adaptive Playback Drift Correction Engine (Task 5.4 & 5.5)
+  // 4. Adaptive Playback Drift Correction Engine (Tasks 5.4, 5.5, 5.6)
   // Runs every 2 seconds during active playback; inhibited during buffering
   useEffect(() => {
     if (!socket || !isEnabled) return;
@@ -508,6 +622,16 @@ export function useVideoSync({
     };
   }, [socket, isEnabled, playerRef, isRoomBuffering]);
 
+  // Compute live high-level sync status for badges and indicators
+  const isLocalPaused = playerRef.current ? playerRef.current.isPaused() : true;
+  const syncStatus = determineSyncStatus({
+    isRoomBuffering,
+    isLocalBuffering: isLocalBufferingRef.current,
+    isNudging,
+    isPaused: isLocalPaused,
+    driftSeconds,
+  });
+
   return {
     handlePlay,
     handlePause,
@@ -515,11 +639,15 @@ export function useVideoSync({
     handlePlaybackRateChange,
     handleBufferingStart,
     handleBufferingEnd,
+    handleResync,
     currentSequence,
     lastAction,
     driftSeconds,
     isNudging,
     bufferingParticipants,
     isRoomBuffering,
+    latencyMs,
+    isResyncing,
+    syncStatus,
   };
 }

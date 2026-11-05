@@ -46,7 +46,7 @@ Located in `backend/tests/`:
   - `test_countdown_task_cancelled`: Background countdown task is properly cancelled on unready or departure.
   - `test_socket_set_ready_rejected_if_unverified`: Socket handler emits `ready_rejected` to unverified participant.
   - `test_socket_set_ready_and_set_unready_success`: Full end-to-end socket ready and unready event lifecycles.
-- **`test_sync.py`** (Phase 5 Tasks 5.2 & 5.3):
+- **`test_sync.py`** (Phase 5 Tasks 5.2, 5.3, 5.4, 5.5 & 5.6):
   - `test_playback_manager_initial_state`: Initial state defaults (is_playing=False, current_time=0.0, playback_speed=1.0, seq=0).
   - `test_playback_manager_play_action`: PLAY action updates is_playing to True and increments sequence_number.
   - `test_playback_manager_pause_action`: PAUSE action updates is_playing to False and records position.
@@ -69,6 +69,10 @@ Located in `backend/tests/`:
   - `test_socket_buffering_multiple_participants_coordination`: Multi-participant buffering coordination verifying playback stays paused until the last buffering participant finishes.
   - `test_socket_buffering_disconnect_recovery`: Verifies that if a buffering participant disconnects, remaining viewers resume automatically.
   - `test_socket_buffering_unverified_rejected`: Verifies unverified participants cannot trigger buffering events.
+  - `test_ping_check_latency_measurement` (Task 5.6): Round-trip ping echo validation returning client timestamp and server time.
+  - `test_manual_resync_alignment_playing` (Task 5.6): Authoritative playback state alignment when playing, calculating elapsed server time.
+  - `test_manual_resync_alignment_paused` (Task 5.6): Authoritative playback state alignment when paused, retaining static position.
+  - `test_manual_resync_alignment_buffering_preservation` (Task 5.6): Authoritative state retrieval preserving `paused_for_buffering` status during manual resync.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -82,6 +86,10 @@ Located in `frontend/tests/`:
     - Exact threshold boundaries: verifies 0.25s triggers micro-adjustment and 1.5s triggers hard seek.
     - Paused state handling: tests that paused playback (server or local) inhibits drift adjustments and resets active nudges.
     - Null snapshot safety: graceful `NONE` fallback.
+- **`sync_health.test.ts`** (10 unit tests, Task 5.6):
+  - `determineSyncStatus`: validates statuses across room buffering, local buffering, active nudging, paused playback, and nominal synchronized playback.
+  - `computePingLatency`: validates round-trip ping time calculation and negative clock-skew clamping.
+  - `calculateResyncTarget`: verifies target timestamp calculation with elapsed time at 1.0x, custom rates (1.5x), and static timestamp preservation while paused.
 
 ---
 
