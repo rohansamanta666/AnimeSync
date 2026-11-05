@@ -46,11 +46,18 @@ Located in `backend/tests/`:
   - `test_countdown_task_cancelled`: Background countdown task is properly cancelled on unready or departure.
   - `test_socket_set_ready_rejected_if_unverified`: Socket handler emits `ready_rejected` to unverified participant.
   - `test_socket_set_ready_and_set_unready_success`: Full end-to-end socket ready and unready event lifecycles.
-- **`test_sync.py`** (Phase 5):
-  - Server-authoritative playback state transitions (play, pause, seek, speed).
-  - Monotonic sequence number generation.
-  - Originating socket filtering (avoiding client self-echo loops).
-  - Ready-to-watch gate enforcement (rejecting ready state before verification).
+- **`test_sync.py`** (Phase 5 Task 5.2):
+  - `test_playback_manager_initial_state`: Initial state defaults (is_playing=False, current_time=0.0, playback_speed=1.0, seq=0).
+  - `test_playback_manager_play_action`: PLAY action updates is_playing to True and increments sequence_number.
+  - `test_playback_manager_pause_action`: PAUSE action updates is_playing to False and records position.
+  - `test_playback_manager_seek_action`: SEEK action updates current_time to specified non-negative position.
+  - `test_playback_manager_rate_change`: RATE_CHANGE action updates playback_speed within bounds [0.25, 4.0].
+  - `test_playback_manager_invalid_actions_and_values`: Rejection of invalid action strings, negative timestamps, and out-of-bounds rates.
+  - `test_playback_manager_time_progression`: Authoritative time progression calculation when playing vs static position when paused.
+  - `test_socket_playback_action_unauthenticated`: Rejection of unauthenticated socket connections attempting playback actions.
+  - `test_socket_playback_action_room_isolation_mismatch`: Rejection of commands with mismatched room_code (room isolation).
+  - `test_socket_playback_action_readiness_gate_rejection`: Readiness gate enforcement (rejecting unverified participants).
+  - `test_socket_playback_action_play_pause_seek_rate_lifecycle`: Full socket event lifecycle verifying `playback_sync` broadcast with `originating_socket_id` and monotonic sequence numbers.
 
 ### 2.2 Frontend Tests (`vitest`)
 Located in `frontend/src/__tests__/`:

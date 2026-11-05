@@ -11,6 +11,7 @@ from backend.app.models.room import Room
 from backend.app.models.participant import Participant, ParticipantStatus
 from backend.app.models.episode import Episode
 from backend.app.sockets.connection_manager import connection_manager
+from backend.app.sockets.playback_manager import playback_manager, RoomPlaybackState
 
 # ---------------------------------------------------------------------------
 # Phase 4: Per-room countdown state tracking
@@ -420,6 +421,15 @@ async def _run_countdown(room_code: str, episode_id: str) -> None:
                     {"room_code": room_code, "participants": presence},
                     room=room_code
                 )
+
+                # Phase 5: Initialize room playback state to playing
+                state = playback_manager.get_or_create_state(room_code)
+                state.is_playing = True
+                state.current_time = 0.0
+                state.playback_speed = 1.0
+                state.updated_at = time.time()
+                state.sequence_number += 1
+
                 await sio.emit(
                     "playback_start",
                     {
@@ -580,6 +590,7 @@ async def invalidate_room_readiness(room_code: str, reason: str = "Episode chang
     Exported so files.py can call it.
     """
     _cancel_countdown(room_code)
+    playback_manager.reset_state(room_code)
 
     async with AsyncSessionLocal() as db:
         query = (
@@ -636,3 +647,118 @@ async def invalidate_room_readiness(room_code: str, reason: str = "Episode chang
                 },
                 room=room_code
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.2: Server Playback State Machine
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def playback_action(sid: str, data: dict = None):
+    """
+    Socket.IO handler for client-initiated playback actions (PLAY, PAUSE, SEEK, RATE_CHANGE).
+    Validates:
+      1. Session authentication
+      2. Room membership & isolation
+      3. Participant readiness gate (cannot control playback if file unverified)
+      4. Action & parameter validity (PLAY, PAUSE, SEEK, RATE_CHANGE)
+    Updates RoomPlaybackState and broadcasts 'playback_sync' to the room with origin SID.
+    """
+    if data is None or not isinstance(data, dict):
+        return {"status": "ERROR", "message": "Payload must be a dictionary"}
+
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    # Room isolation: If payload specified room_code, ensure it matches session room
+    req_room_code = (data.get("room_code") or "").strip().upper()
+    if req_room_code and req_room_code != session.room_code:
+        return {
+            "status": "ERROR",
+            "message": f"Room code mismatch: authorized for '{session.room_code}', cannot act on '{req_room_code}'",
+        }
+
+    # Verify participant in DB and validate readiness requirements
+    async with AsyncSessionLocal() as db:
+        p_query = select(Participant).where(Participant.id == session.participant_id)
+        p_res = await db.execute(p_query)
+        participant = p_res.scalar_one_or_none()
+        if not participant:
+            return {"status": "ERROR", "message": "Participant not found"}
+
+        if participant.room_id != session.room_id:
+            return {"status": "ERROR", "message": "Participant does not belong to this room"}
+
+        unverified_statuses = {
+            ParticipantStatus.WAITING_FOR_FILE,
+            ParticipantStatus.DOWNLOADING,
+            ParticipantStatus.DOWNLOADED,
+            ParticipantStatus.VERIFYING,
+            ParticipantStatus.VERIFICATION_FAILED,
+        }
+        if participant.status in unverified_statuses:
+            return {
+                "status": "ERROR",
+                "message": (
+                    f"Participant cannot control playback while status is '{participant.status.value}'. "
+                    "File must be verified first."
+                ),
+            }
+
+    action = data.get("action")
+    timestamp = data.get("timestamp")
+    if timestamp is None:
+        timestamp = data.get("current_time")
+    playback_rate = data.get("playback_rate")
+    if playback_rate is None:
+        playback_rate = data.get("playback_speed")
+
+    state, err = playback_manager.process_action(
+        room_code=session.room_code,
+        action=action,
+        timestamp=timestamp,
+        playback_rate=playback_rate,
+    )
+
+    if err:
+        return {"status": "ERROR", "message": err}
+
+    # Authoritative sync payload sent to all participants in room
+    sync_payload = {
+        "room_code": session.room_code,
+        "action": action.strip().upper(),
+        "timestamp": state.current_time,
+        "current_time": state.current_time,
+        "is_playing": state.is_playing,
+        "playback_rate": state.playback_speed,
+        "playback_speed": state.playback_speed,
+        "server_sequence": state.sequence_number,
+        "sequence_number": state.sequence_number,
+        "server_time": state.updated_at,
+        "updated_at": state.updated_at,
+        "originating_socket_id": sid,
+        "origin_sid": sid,
+        "triggered_by": session.username,
+    }
+
+    # Broadcast authoritative event to the room
+    await sio.emit("playback_sync", sync_payload, room=session.room_code)
+
+    return {
+        "status": "OK",
+        "action": action.strip().upper(),
+        "state": state.to_dict(),
+        "sequence_number": state.sequence_number,
+    }
+
+
+@sio.event
+async def get_playback_state(sid: str, data: dict = None):
+    """Returns current authoritative playback state for the caller's room."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+    state = playback_manager.get_or_create_state(session.room_code)
+    return {"status": "OK", "state": state.to_dict()}
+
