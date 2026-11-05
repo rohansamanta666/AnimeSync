@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 4 (Ready-to-Watch System) — **COMPLETED**
-- **Next Phase**: Phase 5 (Synchronized Video Player)
+- **Current Phase**: Phase 5 (Synchronized Video Player) — **IN PROGRESS (Task 5.1 Completed)**
+- **Next Task**: Phase 5 Task 5.2 (Server Playback State Machine)
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -17,7 +17,7 @@
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
-| **Phase 5** | Synchronized Video Player | Up Next | 0% |
+| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 20% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -96,15 +96,32 @@
   - Dynamic "I'm Ready" / "Cancel Ready" toggle button in `RoomPage` with status validation tooltip and error banner.
   - `PlaybackStartedBanner` confirming synchronized start before Phase 5 player launch.
 
+### Phase 5: Synchronized Video Player (In Progress)
+- [x] **Task 5.1: Custom HTML5 Video Player Component (`VideoPlayer.tsx`)**:
+  - Direct local file playback using `URL.createObjectURL(file)` without streaming from server.
+  - Safe memory cleanup: automatic `URL.revokeObjectURL(url)` on file change or unmount.
+  - Japanese dark theme custom controls overlay: Play/Pause, 10s forward/backward seek, scrubber timeline, time display (`mm:ss`/`hh:mm:ss`), volume slider, mute toggle, playback rate selector (`0.5x` to `2.0x`), and native fullscreen toggle.
+  - Central action flash indicator on play/pause and auto-hiding controls (2.5s mouse inactivity).
+  - Keyboard shortcuts: Space (play/pause), ArrowLeft/Right ($\pm 5$s seek), ArrowUp/Down ($\pm 10\%$ volume), `M` (mute), `F` (fullscreen).
+  - Codec error detection with graceful fallback notification and local re-selection button.
+  - Imperative handle `VideoPlayerHandle` (`play`, `pause`, `seek`, `setPlaybackRate`, `getCurrentTime`, `getDuration`, `isPaused`, `getVideoElement`) for sync engine integration.
+  - Integrated into `RoomPage.tsx` with automatic file binding from `EpisodeVerificationCard.onFileVerified`.
+
 ---
 
 ## 4. In-Progress Features
-- Transitioning to **Phase 5: Synchronized Video Player**.
+- **Phase 5: Synchronized Video Player**:
+  - Task 5.1: Completed.
+  - Task 5.2: Up next.
 
 ---
 
 ## 5. Pending Features
-- Phase 5: HTML5 local video player (`URL.createObjectURL`), server-authoritative sync engine, sequence numbers, adaptive drift correction ($\pm 5\%$ nudges), buffering pause/recovery.
+- Task 5.2: Server playback state machine (`is_playing`, `current_time`, `speed`, `updated_at`, `sequence_number`).
+- Task 5.3: Client-to-server controls (play, pause, seek, speed) with monotonic sequence numbers.
+- Task 5.4: Adaptive drift correction ($\pm 5\%$ nudges, hard seek for drift $\ge 1.5$s).
+- Task 5.5: Buffering detection and recovery.
+- Task 5.6: Resync button and Sync Health UI.
 - Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
 - Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
@@ -122,26 +139,16 @@
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
-  - `test_set_ready_rejected_when_not_verified`: WAITING_FOR_FILE rejected.
-  - `test_verified_participant_transitions_to_ready`: VERIFIED transitions to READY.
-  - `test_unready_reverts_ready_to_verified`: READY reverts to VERIFIED.
-  - `test_all_online_participants_ready_logic`: Online-only readiness evaluation.
-  - `test_invalidate_room_readiness`: Statuses reset to WAITING_FOR_FILE, WATCHING preserved.
-  - `test_countdown_task_cancelled`: Background countdown task properly cancelled.
-  - `test_socket_set_ready_rejected_if_unverified`: Socket handler emits ready_rejected.
-  - `test_socket_set_ready_and_set_unready_success`: Full socket ready/unready lifecycle.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2114 modules transformed, 0 errors)
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2115 modules transformed, 0 errors)
 - Master test runner `./scripts/test.sh` — **PASSED** (All 20 backend tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 5 Implementation: Synchronized Video Player**:
-  1. Build local file video player component using `URL.createObjectURL(selectedFile)`.
-  2. Implement server playback state machine (`is_playing`, `current_time`, `speed`, `updated_at`, `sequence_number`) in `backend/app/sockets/server.py`.
-  3. Implement client-to-server play, pause, seek, and rate-change events with monotonic sequence numbers to prevent feedback loops.
-  4. Implement client drift calculation and adaptive rate nudges ($\pm 5\%$ for drift 0.25s–1.5s; hard seek for drift $\ge 1.5$s).
-  5. Add buffering state broadcasts to pause both participants during stalls.
+- **Phase 5 Task 5.2: Implement server playback state machine**:
+  1. Add in-memory or database-backed `RoomPlaybackState` tracking `is_playing`, `current_time`, `playback_speed`, `updated_at`, and `sequence_number` in `backend/app/sockets/server.py`.
+  2. Implement `playback_action` Socket.IO event handler validating incoming playback actions (`PLAY`, `PAUSE`, `SEEK`, `RATE_CHANGE`).
+  3. Emit authoritative `playback_sync` broadcast to all participants in the room, attaching the originating socket ID so the initiating client does not enter a feedback loop.
 
 ---
 
@@ -151,3 +158,4 @@
 - **Client Web Worker Hashing in 4MB slices**: Guarantees browser main thread remains at 60fps without lag.
 - **Server-Authoritative Ready Gate**: Prevents unverified viewers from desynchronizing playback.
 - **Online-Only Readiness Calculation**: Offline or departed participants do not permanently block active viewers.
+- **Direct Local Playback with URL.createObjectURL**: Video streams 100% locally from disk without passing video bytes through the server or tunnel proxy.

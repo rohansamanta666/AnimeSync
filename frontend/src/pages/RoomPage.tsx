@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Copy,
@@ -27,6 +27,7 @@ import { EpisodeUploadModal } from '../components/file/EpisodeUploadModal';
 import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationCard';
 import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
+import { VideoPlayer, VideoPlayerHandle } from '../components/video/VideoPlayer';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -39,6 +40,8 @@ export const RoomPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [localVideoFile, setLocalVideoFile] = useState<File | null>(null);
+  const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
 
   // Load saved session on mount
   useEffect(() => {
@@ -133,10 +136,25 @@ export const RoomPage: React.FC = () => {
 
     socket.on('episode_added', handleEpisodeAdded);
 
+    const handleEpisodeChanged = () => {
+      setLocalVideoFile(null);
+    };
+    socket.on('episode_changed', handleEpisodeChanged);
+
     return () => {
       socket.off('episode_added', handleEpisodeAdded);
+      socket.off('episode_changed', handleEpisodeChanged);
     };
   }, [socket]);
+
+  // Phase 5 Task 5.1: If synchronized playback has started, trigger local play
+  useEffect(() => {
+    if (playbackStarted && videoPlayerRef.current) {
+      videoPlayerRef.current.play().catch((err) => {
+        console.warn('Auto-play was prevented by browser policy:', err);
+      });
+    }
+  }, [playbackStarted]);
 
   // Handle invitation link copying
   const handleCopyLink = () => {
@@ -293,35 +311,41 @@ export const RoomPage: React.FC = () => {
         {/* Watch Stage & Verification Area (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
           <Card variant="elevated" className="p-0 overflow-hidden border-void-600/80">
-            {/* Video Stage Placeholder / Display */}
-            <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
-              <div className="w-20 h-20 rounded-2xl bg-void-800/80 border border-void-600/80 flex items-center justify-center mb-4 shadow-xl">
-                <Film className="w-8 h-8 text-violet-400" />
-              </div>
-              <h3 className="text-lg font-bold text-white mb-1">
-                {currentEpisode ? currentEpisode.anime_title : 'No Episode Loaded'}
-              </h3>
-              <p className="text-xs text-ink-muted max-w-md">
-                {currentEpisode
-                  ? 'Verify your local video file below before entering the synchronized watch room.'
-                  : auth?.is_host
-                  ? 'Upload an anime episode below to start the verification and watch party.'
-                  : 'Waiting for the host to upload an episode.'}
-              </p>
-
-              {auth?.is_host && !currentEpisode && (
-                <div className="mt-5">
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    leftIcon={<Upload className="w-4 h-4" />}
-                    onClick={() => setShowUploadModal(true)}
-                  >
-                    Upload Anime Episode
-                  </Button>
+            {/* Phase 5 Task 5.1: HTML5 Local Video Player Component */}
+            {currentEpisode ? (
+              <VideoPlayer
+                ref={videoPlayerRef}
+                file={localVideoFile}
+                animeTitle={currentEpisode.anime_title}
+                episodeNumber={currentEpisode.episode_number}
+                onFileSelect={(file) => setLocalVideoFile(file)}
+              />
+            ) : (
+              <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
+                <div className="w-20 h-20 rounded-2xl bg-void-800/80 border border-void-600/80 flex items-center justify-center mb-4 shadow-xl">
+                  <Film className="w-8 h-8 text-violet-400" />
                 </div>
-              )}
-            </div>
+                <h3 className="text-lg font-bold text-white mb-1">No Episode Loaded</h3>
+                <p className="text-xs text-ink-muted max-w-md">
+                  {auth?.is_host
+                    ? 'Upload an anime episode below to start the verification and watch party.'
+                    : 'Waiting for the host to upload an episode.'}
+                </p>
+
+                {auth?.is_host && (
+                  <div className="mt-5">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      leftIcon={<Upload className="w-4 h-4" />}
+                      onClick={() => setShowUploadModal(true)}
+                    >
+                      Upload Anime Episode
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Ready-to-Watch Bar */}
             <div className="p-4 bg-void-900 border-t border-void-700/80 space-y-3">
@@ -400,6 +424,9 @@ export const RoomPage: React.FC = () => {
               episode={currentEpisode}
               auth={auth}
               participantStatus={currentParticipant?.status}
+              onFileVerified={(file) => {
+                setLocalVideoFile(file);
+              }}
               onSendVerificationSocket={(epId, hash, size) => {
                 if (socket) {
                   socket.emit('verify_file', {
