@@ -220,14 +220,53 @@ All REST endpoints are prefixed with `/api`.
     }
     ```
 - **Server $\rightarrow$ Room: `presence_updated`**
-  - Broadcasts updated participant list showing newly updated status (`VERIFIED` or `VERIFICATION_FAILED`).
+  - Broadcasts updated participant list showing newly updated status (`VERIFIED`, `VERIFICATION_FAILED`, `READY`, etc.).
 - **Client $\rightarrow$ Server: `set_ready`**
-  - Payload: `{"is_ready": true}`
-  - *Enforcement*: Server rejects if participant is not `VERIFIED`.
-- **Server $\rightarrow$ Room: `readiness_updated`**
-  - Payload: `{"participant_id": "uuid", "status": "READY"}`
+  - Payload: `{}`
+  - *Enforcement*: Server validates participant is authenticated and `participant.status == VERIFIED`.
+  - Rejects with `ready_rejected` (`{"reason": "NOT_VERIFIED", "message": "..."}`) if unverified.
+  - On success, updates DB to `READY`, emits `ready_acknowledged` (`{"status": "READY"}`), and broadcasts `presence_updated`.
+  - If ALL online participants become `READY`, server triggers `countdown_started` and schedules countdown background task.
+- **Client $\rightarrow$ Server: `set_unready`**
+  - Payload: `{}`
+  - Cancels active countdown if running, reverts participant to `VERIFIED`, emits `unready_acknowledged`, emits `countdown_cancelled` to room, and broadcasts `presence_updated`.
 - **Server $\rightarrow$ Room: `countdown_started`**
-  - Payload: `{"seconds": 3, "target_start_timestamp": 1730740003.5}`
+  - Broadcast when all online participants are `READY`:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "episode_id": "episode-uuid",
+      "target_start_timestamp": 1730740003.5,
+      "countdown_seconds": 3.0
+    }
+    ```
+- **Server $\rightarrow$ Room: `countdown_cancelled`**
+  - Broadcast if any participant un-readies, disconnects, or leaves during countdown:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "cancelled_by": "Alex",
+      "reason": "A participant withdrew their ready status."
+    }
+    ```
+- **Server $\rightarrow$ Room: `playback_start`**
+  - Broadcast when countdown timer finishes:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "episode_id": "episode-uuid",
+      "timestamp": 1730740003.5
+    }
+    ```
+- **Server $\rightarrow$ Room: `episode_changed`**
+  - Broadcast when host uploads a new episode; all participant ready states are invalidated back to `WAITING_FOR_FILE`:
+    ```json
+    {
+      "room_code": "ASYNC1",
+      "reason": "New episode uploaded by host",
+      "message": "A new episode was uploaded. All participants must re-verify their file."
+    }
+    ```
 
 ### 2.3 Synchronized Video Playback
 - **Client $\rightarrow$ Server: `playback_action`**

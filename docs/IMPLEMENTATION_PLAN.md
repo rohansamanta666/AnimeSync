@@ -5,45 +5,45 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ---
 
 ## Phase 1 — Foundation & UI Design System
-- [ ] Task 1.1: Initialize project repository structure, `.gitignore`, `.env.example`, and directory hierarchy.
-- [ ] Task 1.2: Configure Python virtual environment, dependencies (`requirements.txt`), and FastAPI ASGI scaffolding.
-- [ ] Task 1.3: Set up Vite + React + TypeScript + Tailwind CSS with Japanese-inspired dark mode theme (near-black, dark navy, electric violet, neon pink, soft cyan).
-- [ ] Task 1.4: Implement SQLite database schema with SQLAlchemy async engine and automated schema initialization.
-- [ ] Task 1.5: Build core UI components (Navbar, Button, Card, Modal, Input, Badge, Toast notifications).
-- [ ] Task 1.6: Build user entry pages: Landing Page ("Your Anime Night. Together."), Guest Entry / Room Creation, Room Joining, and Room Dashboard.
-- [ ] Task 1.7: Write automated tests for Phase 1 endpoints and UI build verification.
+- [x] Task 1.1: Initialize project repository structure, `.gitignore`, `.env.example`, and directory hierarchy.
+- [x] Task 1.2: Configure Python virtual environment, dependencies (`requirements.txt`), and FastAPI ASGI scaffolding.
+- [x] Task 1.3: Set up Vite + React + TypeScript + Tailwind CSS with Japanese-inspired dark mode theme (near-black, dark navy, electric violet, neon pink, soft cyan).
+- [x] Task 1.4: Implement SQLite database schema with SQLAlchemy async engine and automated schema initialization.
+- [x] Task 1.5: Build core UI components (Navbar, Button, Card, Modal, Input, Badge, Toast notifications).
+- [x] Task 1.6: Build user entry pages: Landing Page ("Your Anime Night. Together."), Guest Entry / Room Creation, Room Joining, and Room Dashboard.
+- [x] Task 1.7: Write automated tests for Phase 1 endpoints and UI build verification.
 
 ---
 
 ## Phase 2 — Private Rooms & Realtime Presence
-- [ ] Task 2.1: Implement Room CRUD API and secure 6-character room code generation.
-- [ ] Task 2.2: Implement guest session management with secure participant tokens (UUID cookies/headers).
-- [ ] Task 2.3: Integrate Python-SocketIO server with FastAPI ASGI mount.
-- [ ] Task 2.4: Build real-time presence system (`join_room`, `leave_room`, `disconnect`, `user_joined`, `user_left`).
-- [ ] Task 2.5: Build Room Waiting Lobby view showing active participants, roles (Host/Guest), and connection health.
-- [ ] Task 2.6: Test multi-client room connection, disconnect handling, and automatic reconnect recovery.
+- [x] Task 2.1: Implement Room CRUD API and secure 6-character room code generation.
+- [x] Task 2.2: Implement guest session management with secure participant tokens (UUID cookies/headers).
+- [x] Task 2.3: Integrate Python-SocketIO server with FastAPI ASGI mount.
+- [x] Task 2.4: Build real-time presence system (`join_room`, `leave_room`, `disconnect`, `user_joined`, `user_left`).
+- [x] Task 2.5: Build Room Waiting Lobby view showing active participants, roles (Host/Guest), and connection health.
+- [x] Task 2.6: Test multi-client room connection, disconnect handling, and automatic reconnect recovery.
 
 ---
 
 ## Phase 3 — Video Distribution & File Verification
-- [ ] Task 3.1: Implement chunked file upload API (`/api/files/upload/init`, `/api/files/upload/chunk`, `/api/files/upload/complete`).
-- [ ] Task 3.2: Implement server-side incremental SHA-256 calculation and safe filesystem storage (`storage/videos/`).
-- [ ] Task 3.3: Implement resumable chunked downloads with HTTP `Range` request support (`Accept-Ranges: bytes`).
-- [ ] Task 3.4: Build Client-side Upload UI with chunk progress bar, cancel, and retry capabilities.
-- [ ] Task 3.5: Build Client-side Download UI with byte progress and completion confirmation.
-- [ ] Task 3.6: Implement HTML5 local file picker and Web Worker for streaming client-side SHA-256 calculation without main-thread blocking.
-- [ ] Task 3.7: Implement socket event `verify_file` where server validates client checksum against authoritative database hash.
-- [ ] Task 3.8: Unit and integration tests for upload chunk assembly, hash verification, and mismatch handling.
+- [x] Task 3.1: Implement chunked file upload API (`/api/files/upload/init`, `/api/files/upload/chunk`, `/api/files/upload/complete`).
+- [x] Task 3.2: Implement server-side incremental SHA-256 calculation and safe filesystem storage (`storage/videos/`).
+- [x] Task 3.3: Implement resumable chunked downloads with HTTP `Range` request support (`Accept-Ranges: bytes`).
+- [x] Task 3.4: Build Client-side Upload UI with chunk progress bar, cancel, and retry capabilities.
+- [x] Task 3.5: Build Client-side Download UI with byte progress and completion confirmation.
+- [x] Task 3.6: Implement HTML5 local file picker and Web Worker for streaming client-side SHA-256 calculation without main-thread blocking.
+- [x] Task 3.7: Implement socket event `verify_file` where server validates client checksum against authoritative database hash.
+- [x] Task 3.8: Unit and integration tests for upload chunk assembly, hash verification, and mismatch handling.
 
 ---
 
 ## Phase 4 — Ready-to-Watch System
-- [ ] Task 4.1: Model participant states: `WAITING_FOR_FILE`, `DOWNLOADING`, `VERIFYING`, `VERIFICATION_FAILED`, `VERIFIED`, `READY`, `WATCHING`.
-- [ ] Task 4.2: Enforce server-authoritative readiness rules (participant cannot declare `READY` without server `VERIFIED` state).
-- [ ] Task 4.3: Implement Ready/Unready toggle UI with clear state badges for both participants.
-- [ ] Task 4.4: Implement server-coordinated synchronized countdown (3.. 2.. 1.. Watch!) with authoritative start timestamp.
-- [ ] Task 4.5: Handle state invalidation: if host uploads new episode or guest changes file, reset readiness back to verification.
-- [ ] Task 4.6: Automated tests verifying state machine transitions and readiness gates.
+- [x] Task 4.1: Model participant states: `WAITING_FOR_FILE`, `DOWNLOADING`, `VERIFYING`, `VERIFICATION_FAILED`, `VERIFIED`, `READY`, `WATCHING`.
+- [x] Task 4.2: Enforce server-authoritative readiness rules (participant cannot declare `READY` without server `VERIFIED` state).
+- [x] Task 4.3: Implement Ready/Unready toggle UI with clear state badges for both participants.
+- [x] Task 4.4: Implement server-coordinated synchronized countdown (3.. 2.. 1.. Watch!) with authoritative start timestamp.
+- [x] Task 4.5: Handle state invalidation: if host uploads new episode or guest changes file, reset readiness back to verification.
+- [x] Task 4.6: Automated tests verifying state machine transitions and readiness gates.
 
 ---
 

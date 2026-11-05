@@ -13,16 +13,20 @@ import {
   RefreshCw,
   Plus,
   Upload,
+  X,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
 import { useSocket } from '../hooks/useSocket';
+import { useReadyState } from '../hooks/useReadyState';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { JoinRoomModal } from '../components/room/JoinRoomModal';
 import { EpisodeUploadModal } from '../components/file/EpisodeUploadModal';
 import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationCard';
+import { CountdownOverlay } from '../components/room/CountdownOverlay';
+import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -77,6 +81,36 @@ export const RoomPage: React.FC = () => {
 
   // Authoritative current room data (prefer real-time snapshot when available)
   const room = roomSnapshot || initialRoom;
+
+  // Phase 4: pre-compute participant status before full derivation so useReadyState
+  // has status on the very first render (presence may be [] until socket connects).
+  const earlyPresence: ParticipantPresence[] =
+    presence.length > 0
+      ? presence
+      : (initialRoom?.participants ?? []).map((p) => ({
+          id: p.id,
+          username: p.username,
+          is_host: p.is_host,
+          is_online: false,
+          status: p.status,
+          active_connections: 0,
+          last_seen: p.last_seen,
+        }));
+  const earlyCurrentParticipant = auth
+    ? earlyPresence.find((p) => p.id === auth.participant_id)
+    : null;
+
+  const {
+    isReady,
+    isPending,
+    rejectionReason,
+    countdown,
+    markReady,
+    markUnready,
+    playbackStarted,
+    playbackEpisodeId,
+    acknowledgePlayback,
+  } = useReadyState(socket, earlyCurrentParticipant?.status);
 
   // Listen for socket events: episode added and verification result
   useEffect(() => {
@@ -290,33 +324,72 @@ export const RoomPage: React.FC = () => {
             </div>
 
             {/* Ready-to-Watch Bar */}
-            <div className="p-4 bg-void-900 border-t border-void-700/80 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-mono text-ink-muted">Your Status:</span>
-                  <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
+            <div className="p-4 bg-void-900 border-t border-void-700/80 space-y-3">
+              {/* Rejection notice */}
+              {rejectionReason && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-950/80 border border-rose-800 text-rose-300 text-xs">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                  <span className="flex-1">{rejectionReason}</span>
+                  <button onClick={() => {}} className="shrink-0">
+                    <X className="w-3.5 h-3.5 text-rose-500 hover:text-rose-300" />
+                  </button>
                 </div>
-              </div>
+              )}
 
-              <div className="flex items-center gap-2">
-                {auth?.is_host && currentEpisode && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    leftIcon={<Plus className="w-4 h-4" />}
-                    onClick={() => setShowUploadModal(true)}
-                  >
-                    Upload Another
-                  </Button>
-                )}
-                <Button
-                  variant="primary"
-                  size="sm"
-                  disabled={currentParticipant?.status !== 'VERIFIED'}
-                  leftIcon={<Sparkles className="w-4 h-4" />}
-                >
-                  I'm Ready
-                </Button>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-ink-muted">Your Status:</span>
+                    <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
+                  </div>
+                  {/* Countdown preview in bar when active */}
+                  {countdown.active && (
+                    <span className="text-xs font-mono text-violet-300 animate-pulse">
+                      Starting in {countdown.secondsRemaining}s…
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {auth?.is_host && currentEpisode && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<Plus className="w-4 h-4" />}
+                      onClick={() => setShowUploadModal(true)}
+                    >
+                      Upload Another
+                    </Button>
+                  )}
+
+                  {/* Ready / Unready toggle */}
+                  {isReady ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isPending}
+                      leftIcon={<X className="w-4 h-4 text-rose-400" />}
+                      onClick={markUnready}
+                    >
+                      {isPending ? 'Updating…' : 'Cancel Ready'}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={currentParticipant?.status !== 'VERIFIED' || isPending}
+                      leftIcon={<Sparkles className="w-4 h-4" />}
+                      onClick={markReady}
+                      title={
+                        currentParticipant?.status !== 'VERIFIED'
+                          ? 'Verify your local file first'
+                          : 'Mark yourself as ready to watch'
+                      }
+                    >
+                      {isPending ? 'Updating…' : "I'm Ready"}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </Card>
@@ -457,6 +530,19 @@ export const RoomPage: React.FC = () => {
             }
           }}
           initialCode={room.code}
+        />
+      )}
+
+      {/* Phase 4: Synchronized countdown overlay */}
+      {countdown.active && (
+        <CountdownOverlay countdown={countdown} onCancel={markUnready} />
+      )}
+
+      {/* Phase 4: Playback started banner (Phase 5 will replace with actual player) */}
+      {playbackStarted && (
+        <PlaybackStartedBanner
+          episodeId={playbackEpisodeId}
+          onDismiss={acknowledgePlayback}
         />
       )}
     </div>

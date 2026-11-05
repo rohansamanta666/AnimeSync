@@ -21,6 +21,7 @@ from backend.app.schemas.episode import (
 )
 from backend.app.schemas.room import EpisodeResponse
 from backend.app.sockets import sio
+from backend.app.sockets.server import invalidate_room_readiness
 
 router = APIRouter(prefix="/files", tags=["Files"])
 
@@ -158,6 +159,8 @@ async def complete_upload(
                 "queue_position": episode.queue_position
             }
             await sio.emit("episode_added", {"episode": episode_dict}, room=room.code)
+            # Phase 4: Reset all participant readiness when a new episode is uploaded
+            await invalidate_room_readiness(room.code, reason="New episode uploaded by host")
 
         return EpisodeResponse.model_validate(episode)
     except Exception as e:

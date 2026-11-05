@@ -36,6 +36,16 @@ Located in `backend/tests/`:
   - File assembly and SHA-256 hash comparison between uploaded stream and raw file.
   - Prevention of path traversal attacks (`../../` filenames).
   - Resumable upload chunk index tracking.
+  - Cross-room unauthorized file download prevention.
+- **`test_ready_state.py`** (Phase 4):
+  - `test_set_ready_rejected_when_not_verified`: WAITING_FOR_FILE status prevents participant from marking READY.
+  - `test_verified_participant_transitions_to_ready`: Authoritative transition from VERIFIED to READY in DB.
+  - `test_unready_reverts_ready_to_verified`: Withdrawing ready state cleanly reverts participant back to VERIFIED.
+  - `test_all_online_participants_ready_logic`: Verifies that only currently connected online participants gate the countdown.
+  - `test_invalidate_room_readiness`: Verifies that new episode uploads reset all participants back to WAITING_FOR_FILE while preserving active WATCHING status.
+  - `test_countdown_task_cancelled`: Background countdown task is properly cancelled on unready or departure.
+  - `test_socket_set_ready_rejected_if_unverified`: Socket handler emits `ready_rejected` to unverified participant.
+  - `test_socket_set_ready_and_set_unready_success`: Full end-to-end socket ready and unready event lifecycles.
 - **`test_sync.py`** (Phase 5):
   - Server-authoritative playback state transitions (play, pause, seek, speed).
   - Monotonic sequence number generation.

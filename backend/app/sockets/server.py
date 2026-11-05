@@ -1,5 +1,7 @@
+import asyncio
 import time
 from datetime import datetime, timezone
+from typing import Optional
 import socketio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -9,6 +11,13 @@ from backend.app.models.room import Room
 from backend.app.models.participant import Participant, ParticipantStatus
 from backend.app.models.episode import Episode
 from backend.app.sockets.connection_manager import connection_manager
+
+# ---------------------------------------------------------------------------
+# Phase 4: Per-room countdown state tracking
+# Maps room_code -> asyncio.Task (the pending countdown task)
+# If the dict has an entry, a countdown is in progress for that room.
+# ---------------------------------------------------------------------------
+_countdown_tasks: dict[str, asyncio.Task] = {}
 
 # Create Async Socket.IO Server
 sio = socketio.AsyncServer(
@@ -32,6 +41,19 @@ async def disconnect(sid: str):
 
     session, is_now_offline = result
     if is_now_offline:
+        # Phase 4: Cancel room countdown if active when an online participant disconnects
+        if session.room_code in _countdown_tasks:
+            _cancel_countdown(session.room_code)
+            await sio.emit(
+                "countdown_cancelled",
+                {
+                    "room_code": session.room_code,
+                    "cancelled_by": session.username,
+                    "reason": f"{session.username} disconnected during countdown."
+                },
+                room=session.room_code
+            )
+
         async with AsyncSessionLocal() as db:
             # Update last_seen in database
             query = select(Participant).where(Participant.id == session.participant_id)
@@ -212,6 +234,19 @@ async def leave_room(sid: str, data: dict = None):
 
     async with AsyncSessionLocal() as db:
         if is_now_offline:
+            # Phase 4: Cancel room countdown if active when participant leaves
+            if session.room_code in _countdown_tasks:
+                _cancel_countdown(session.room_code)
+                await sio.emit(
+                    "countdown_cancelled",
+                    {
+                        "room_code": session.room_code,
+                        "cancelled_by": session.username,
+                        "reason": f"{session.username} left the room."
+                    },
+                    room=session.room_code
+                )
+
             presence = await connection_manager.get_presence_payload(db, session.room_code)
             await sio.emit(
                 "user_left",
@@ -315,3 +350,289 @@ async def verify_file(sid: str, data: dict):
                 room=session.room_code
             )
             return result_payload
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Ready-to-Watch System
+# ---------------------------------------------------------------------------
+
+COUNTDOWN_SECONDS = 3.0  # Seconds before playback starts after all ready
+
+
+def _cancel_countdown(room_code: str) -> None:
+    """Cancel any pending countdown task for a room (idempotent)."""
+    task = _countdown_tasks.pop(room_code, None)
+    if task and not task.done():
+        task.cancel()
+
+
+async def _all_online_participants_ready(db: AsyncSession, room_code: str) -> tuple[bool, list]:
+    """
+    Returns (all_ready, participants_list).
+    'All ready' means every ONLINE participant has status == READY.
+    Offline participants (no active socket) are excluded from the check
+    so a disconnected viewer does not permanently block the watch party.
+    At least one participant must be online.
+    """
+    query = (
+        select(Room)
+        .where(Room.code == room_code)
+        .options(selectinload(Room.participants))
+    )
+    res = await db.execute(query)
+    room = res.scalar_one_or_none()
+    if not room:
+        return False, []
+
+    online_participants = [
+        p for p in room.participants
+        if connection_manager.is_participant_online(room_code, p.id)
+    ]
+
+    if not online_participants:
+        return False, room.participants
+
+    all_ready = all(p.status == ParticipantStatus.READY for p in online_participants)
+    return all_ready, room.participants
+
+
+async def _run_countdown(room_code: str, episode_id: str) -> None:
+    """
+    Background coroutine: waits COUNTDOWN_SECONDS then emits 'playback_start'.
+    Cancelled cleanly if any participant un-readies or disconnects.
+    """
+    try:
+        await asyncio.sleep(COUNTDOWN_SECONDS)
+        # Transition all READY participants -> WATCHING
+        async with AsyncSessionLocal() as db:
+            query = select(Room).where(Room.code == room_code).options(selectinload(Room.participants))
+            res = await db.execute(query)
+            room = res.scalar_one_or_none()
+            if room:
+                for p in room.participants:
+                    if p.status == ParticipantStatus.READY:
+                        p.status = ParticipantStatus.WATCHING
+                await db.commit()
+
+                presence = await connection_manager.get_presence_payload(db, room_code)
+                await sio.emit(
+                    "presence_updated",
+                    {"room_code": room_code, "participants": presence},
+                    room=room_code
+                )
+                await sio.emit(
+                    "playback_start",
+                    {
+                        "room_code": room_code,
+                        "episode_id": episode_id,
+                        "timestamp": time.time()
+                    },
+                    room=room_code
+                )
+    except asyncio.CancelledError:
+        pass  # Countdown was cancelled; presense already updated by caller
+    finally:
+        _countdown_tasks.pop(room_code, None)
+
+
+@sio.event
+async def set_ready(sid: str, data: dict = None):
+    """
+    Participant signals they are ready to watch.
+    Rules enforced server-side:
+      - Participant must be authenticated.
+      - Participant.status must currently be VERIFIED.
+      - If ALL online participants become READY, start COUNTDOWN_SECONDS countdown.
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    async with AsyncSessionLocal() as db:
+        # Fetch participant
+        p_query = select(Participant).where(Participant.id == session.participant_id)
+        p_res = await db.execute(p_query)
+        participant = p_res.scalar_one_or_none()
+        if not participant:
+            return {"status": "ERROR", "message": "Participant not found"}
+
+        # Enforce: must be VERIFIED to become READY
+        if participant.status != ParticipantStatus.VERIFIED:
+            await sio.emit(
+                "ready_rejected",
+                {
+                    "reason": "NOT_VERIFIED",
+                    "message": (
+                        "You must verify your local file before marking yourself as ready. "
+                        f"Current status: {participant.status.value}"
+                    )
+                },
+                to=sid
+            )
+            return {"status": "ERROR", "message": "Participant not VERIFIED"}
+
+        # Cancel any existing countdown (a previous all-ready may have been invalidated)
+        _cancel_countdown(session.room_code)
+
+        participant.status = ParticipantStatus.READY
+        await db.commit()
+
+        # Broadcast readiness change
+        presence = await connection_manager.get_presence_payload(db, session.room_code)
+        await sio.emit(
+            "presence_updated",
+            {"room_code": session.room_code, "participants": presence},
+            room=session.room_code
+        )
+
+        # Emit personal acknowledgement
+        await sio.emit("ready_acknowledged", {"status": "READY"}, to=sid)
+
+        # Check if ALL online participants are now READY
+        all_ready, all_participants = await _all_online_participants_ready(db, session.room_code)
+
+        if all_ready:
+            # Find the current episode id for the room
+            ep_query = (
+                select(Room)
+                .where(Room.code == session.room_code)
+                .options(selectinload(Room.episodes))
+            )
+            ep_res = await db.execute(ep_query)
+            room = ep_res.scalar_one_or_none()
+            episode_id: Optional[str] = room.current_episode_id if room else None
+
+            target_start_timestamp = time.time() + COUNTDOWN_SECONDS
+            await sio.emit(
+                "countdown_started",
+                {
+                    "room_code": session.room_code,
+                    "episode_id": episode_id,
+                    "target_start_timestamp": target_start_timestamp,
+                    "countdown_seconds": COUNTDOWN_SECONDS
+                },
+                room=session.room_code
+            )
+
+            # Kick off background countdown
+            task = asyncio.ensure_future(
+                _run_countdown(session.room_code, episode_id or "")
+            )
+            _countdown_tasks[session.room_code] = task
+
+    return {"status": "OK", "message": "Ready status set"}
+
+
+@sio.event
+async def set_unready(sid: str, data: dict = None):
+    """
+    Participant withdraws their ready status.
+    - Allowed from READY status only (idempotent for other states).
+    - Cancels any in-progress countdown for the room.
+    - Reverts participant to VERIFIED.
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    async with AsyncSessionLocal() as db:
+        p_query = select(Participant).where(Participant.id == session.participant_id)
+        p_res = await db.execute(p_query)
+        participant = p_res.scalar_one_or_none()
+        if not participant:
+            return {"status": "ERROR", "message": "Participant not found"}
+
+        if participant.status == ParticipantStatus.READY:
+            # Cancel any countdown that may have been started
+            _cancel_countdown(session.room_code)
+
+            participant.status = ParticipantStatus.VERIFIED
+            await db.commit()
+
+            # Notify room that countdown was cancelled
+            await sio.emit(
+                "countdown_cancelled",
+                {
+                    "room_code": session.room_code,
+                    "cancelled_by": session.username,
+                    "reason": "A participant withdrew their ready status."
+                },
+                room=session.room_code
+            )
+
+            # Broadcast updated presence
+            presence = await connection_manager.get_presence_payload(db, session.room_code)
+            await sio.emit(
+                "presence_updated",
+                {"room_code": session.room_code, "participants": presence},
+                room=session.room_code
+            )
+
+        await sio.emit("unready_acknowledged", {"status": "VERIFIED"}, to=sid)
+
+    return {"status": "OK", "message": "Ready status cleared"}
+
+
+async def invalidate_room_readiness(room_code: str, reason: str = "Episode changed") -> None:
+    """
+    Called by the files API when host completes a new upload.
+    Resets all non-WATCHING participants back to WAITING_FOR_FILE and cancels countdown.
+    Exported so files.py can call it.
+    """
+    _cancel_countdown(room_code)
+
+    async with AsyncSessionLocal() as db:
+        query = (
+            select(Room)
+            .where(Room.code == room_code)
+            .options(selectinload(Room.participants))
+        )
+        res = await db.execute(query)
+        room = res.scalar_one_or_none()
+        if not room:
+            return
+
+        reset_statuses = {
+            ParticipantStatus.READY,
+            ParticipantStatus.VERIFIED,
+            ParticipantStatus.VERIFYING,
+            ParticipantStatus.VERIFICATION_FAILED,
+            ParticipantStatus.DOWNLOADED,
+            ParticipantStatus.DOWNLOADING,
+        }
+        changed = False
+        for p in room.participants:
+            if p.status in reset_statuses:
+                p.status = ParticipantStatus.WAITING_FOR_FILE
+                p.verified_file_hash = None
+                changed = True
+
+        if changed:
+            await db.commit()
+
+        presence = await connection_manager.get_presence_payload(db, room_code)
+
+        await sio.emit(
+            "episode_changed",
+            {
+                "room_code": room_code,
+                "reason": reason,
+                "message": "A new episode was uploaded. All participants must re-verify their file."
+            },
+            room=room_code
+        )
+        await sio.emit(
+            "presence_updated",
+            {"room_code": room_code, "participants": presence},
+            room=room_code
+        )
+        if changed:
+            await sio.emit(
+                "countdown_cancelled",
+                {
+                    "room_code": room_code,
+                    "cancelled_by": "server",
+                    "reason": reason
+                },
+                room=room_code
+            )

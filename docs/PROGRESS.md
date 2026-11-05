@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 3 (Video Distribution & File Verification) — **COMPLETED**
-- **Next Phase**: Phase 4 (Ready-to-Watch System)
+- **Current Phase**: Phase 4 (Ready-to-Watch System) — **COMPLETED**
+- **Next Phase**: Phase 5 (Synchronized Video Player)
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -16,8 +16,8 @@
 | **Phase 1** | Foundation & UI Design System | **COMPLETED** | 100% |
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
-| **Phase 4** | Ready-to-Watch System | Up Next | 0% |
-| **Phase 5** | Synchronized Video Player | Pending | 0% |
+| **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
+| **Phase 5** | Synchronized Video Player | Up Next | 0% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -73,16 +73,38 @@
   - `EpisodeUploadModal`: Chunked upload progress bar, chunk counter, and cancellation.
   - `EpisodeVerificationCard`: Episode metadata, range-request download button, file picker, live Web Worker verification progress bar, and instant verified/mismatch status banners.
 
+### Phase 4: Ready-to-Watch System
+- [x] **Server-Authoritative Ready Gate**:
+  - `set_ready` Socket.IO handler strictly validates that `participant.status == VERIFIED` in the database.
+  - Rejects premature ready declarations with `ready_rejected` event (`reason: NOT_VERIFIED`).
+  - Transitions participant to `READY` and updates presence room-wide in real time.
+- [x] **Ready Cancellation & Reversion**:
+  - `set_unready` Socket.IO handler allows participants to withdraw readiness, cleanly reverting their state back to `VERIFIED`.
+  - Instantly aborts any active room countdown and alerts the room with `countdown_cancelled`.
+- [x] **Server-Coordinated Synchronized Countdown**:
+  - Authoritative check `_all_online_participants_ready`: verifies every connected online participant is `READY` (safely ignoring disconnected viewers).
+  - Emits `countdown_started` with exact target UNIX start timestamp (`target_start_timestamp = time.time() + 3.0`).
+  - Background async task `_run_countdown` waits 3.0s, atomically transitions all `READY` participants to `WATCHING`, and emits `playback_start`.
+- [x] **Disconnection & Departure Safety**:
+  - If any participant disconnects or leaves during countdown, the countdown is automatically cancelled (`countdown_cancelled`).
+- [x] **Readiness Invalidation on New Video**:
+  - Server function `invalidate_room_readiness` resets all non-watching participants back to `WAITING_FOR_FILE`, clears `verified_file_hash`, cancels countdowns, and broadcasts `episode_changed`.
+  - Automatically triggered when the host uploads a new episode via `POST /api/files/upload/complete`.
+- [x] **Frontend Ready-to-Watch UI**:
+  - `useReadyState` custom hook managing socket events, local state, and smooth `requestAnimationFrame` countdown ticker.
+  - `CountdownOverlay` full-screen ambient animation with glowing rings, second-by-second pop animations, and cancellation shortcut.
+  - Dynamic "I'm Ready" / "Cancel Ready" toggle button in `RoomPage` with status validation tooltip and error banner.
+  - `PlaybackStartedBanner` confirming synchronized start before Phase 5 player launch.
+
 ---
 
 ## 4. In-Progress Features
-- Transitioning to **Phase 4: Ready-to-Watch System**.
+- Transitioning to **Phase 5: Synchronized Video Player**.
 
 ---
 
 ## 5. Pending Features
-- Phase 4: Ready-to-Watch state machine, verification validation, ready/unready toggle, synchronized countdown.
-- Phase 5: HTML5 local video player, server-authoritative sync, adaptive drift correction, buffering recovery.
+- Phase 5: HTML5 local video player (`URL.createObjectURL`), server-authoritative sync engine, sequence numbers, adaptive drift correction ($\pm 5\%$ nudges), buffering pause/recovery.
 - Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
 - Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
@@ -99,21 +121,27 @@
 - `backend/tests/test_rooms.py` (3 tests) — **PASSED**
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
-  - `test_chunked_upload_assembly_and_sha256`: 3 chunks uploaded, assembled, incremental SHA-256 validated, range download 206 verified, and socket file verification tested.
-  - `test_missing_chunk_finalize_rejection`: Finalize rejected if chunks are missing.
-  - `test_unauthorized_download_prevention`: Cross-room file downloads rejected with 403 Forbidden.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2111 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 12 backend tests + Vite build)
+- `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
+  - `test_set_ready_rejected_when_not_verified`: WAITING_FOR_FILE rejected.
+  - `test_verified_participant_transitions_to_ready`: VERIFIED transitions to READY.
+  - `test_unready_reverts_ready_to_verified`: READY reverts to VERIFIED.
+  - `test_all_online_participants_ready_logic`: Online-only readiness evaluation.
+  - `test_invalidate_room_readiness`: Statuses reset to WAITING_FOR_FILE, WATCHING preserved.
+  - `test_countdown_task_cancelled`: Background countdown task properly cancelled.
+  - `test_socket_set_ready_rejected_if_unverified`: Socket handler emits ready_rejected.
+  - `test_socket_set_ready_and_set_unready_success`: Full socket ready/unready lifecycle.
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2114 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 20 backend tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 4 Implementation**:
-  1. Formalize authoritative Ready-to-Watch state machine transitions on server.
-  2. Implement `set_ready` / `set_unready` Socket.IO events with strict server-side validation (`status == VERIFIED`).
-  3. Invalidate readiness if episode is replaced or participant selects a different file.
-  4. Implement server-coordinated 3-second synchronized countdown timer (`countdown_started`, `target_start_timestamp`).
-  5. Build Ready-to-Watch UI controls and countdown overlay in frontend.
+- **Phase 5 Implementation: Synchronized Video Player**:
+  1. Build local file video player component using `URL.createObjectURL(selectedFile)`.
+  2. Implement server playback state machine (`is_playing`, `current_time`, `speed`, `updated_at`, `sequence_number`) in `backend/app/sockets/server.py`.
+  3. Implement client-to-server play, pause, seek, and rate-change events with monotonic sequence numbers to prevent feedback loops.
+  4. Implement client drift calculation and adaptive rate nudges ($\pm 5\%$ for drift 0.25s–1.5s; hard seek for drift $\ge 1.5$s).
+  5. Add buffering state broadcasts to pause both participants during stalls.
 
 ---
 
@@ -121,3 +149,5 @@
 - **Chunked Upload 5MB limit**: Guarantees zero failures over Cloudflare free tunnel proxy.
 - **Incremental SHA-256 in 64KB blocks**: Keeps host RAM consumption at $O(1)$ during video assembly.
 - **Client Web Worker Hashing in 4MB slices**: Guarantees browser main thread remains at 60fps without lag.
+- **Server-Authoritative Ready Gate**: Prevents unverified viewers from desynchronizing playback.
+- **Online-Only Readiness Calculation**: Offline or departed participants do not permanently block active viewers.
