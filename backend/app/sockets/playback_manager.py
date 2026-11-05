@@ -1,16 +1,18 @@
 """
-AnimeSync — Playback State Machine (Phase 5 Task 5.2)
+AnimeSync — Playback State Machine (Phase 5 Tasks 5.2 & 5.5)
 
-Tracks and coordinates server-authoritative playback state per room:
+Tracks and coordinates server-authoritative playback state and buffering per room:
 - is_playing: boolean
 - current_time: authoritative video position in seconds
 - playback_speed: playback multiplier (e.g. 1.0, 1.25)
 - updated_at: server monotonic/epoch timestamp of last state change
 - sequence_number: monotonically increasing integer on every valid action
+- paused_for_buffering: whether the playback was automatically paused due to buffering
+- buffering_participants: tracking participants who are currently buffering
 """
 import time
-from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
 
 VALID_ACTIONS = {"PLAY", "PAUSE", "SEEK", "RATE_CHANGE"}
 MIN_PLAYBACK_SPEED = 0.25
@@ -25,6 +27,7 @@ class RoomPlaybackState:
     playback_speed: float = 1.0
     updated_at: float = 0.0
     sequence_number: int = 0
+    paused_for_buffering: bool = False
 
     def compute_current_time(self, now: Optional[float] = None) -> float:
         """
@@ -47,14 +50,17 @@ class RoomPlaybackState:
             "playback_speed": self.playback_speed,
             "updated_at": self.updated_at,
             "sequence_number": self.sequence_number,
+            "paused_for_buffering": self.paused_for_buffering,
         }
 
 
 class PlaybackManager:
-    """In-memory manager tracking playback state for all active rooms."""
+    """In-memory manager tracking playback state and buffering coordination for all active rooms."""
 
     def __init__(self):
         self._states: Dict[str, RoomPlaybackState] = {}
+        # room_code -> {participant_id: username}
+        self._buffering_participants: Dict[str, Dict[str, str]] = {}
 
     def get_state(self, room_code: str) -> Optional[RoomPlaybackState]:
         return self._states.get(room_code.upper())
@@ -69,6 +75,7 @@ class PlaybackManager:
                 playback_speed=1.0,
                 updated_at=time.time(),
                 sequence_number=0,
+                paused_for_buffering=False,
             )
         return self._states[code]
 
@@ -81,13 +88,102 @@ class PlaybackManager:
             playback_speed=1.0,
             updated_at=time.time(),
             sequence_number=0,
+            paused_for_buffering=False,
         )
         self._states[code] = state
+        self.clear_room_buffering(code)
         return state
 
     def clear(self) -> None:
-        """Clear all room playback states (used for test isolation)."""
+        """Clear all room playback states and buffering info (used for test isolation)."""
         self._states.clear()
+        self._buffering_participants.clear()
+
+    # ---------------------------------------------------------------------------
+    # Buffering Tracking & Shared Pause / Resume Coordination
+    # ---------------------------------------------------------------------------
+
+    def get_buffering_participants(self, room_code: str) -> Dict[str, str]:
+        """Returns mapping of participant_id -> username for currently buffering participants."""
+        return dict(self._buffering_participants.get(room_code.upper(), {}))
+
+    def get_buffering_usernames(self, room_code: str) -> List[str]:
+        return list(self.get_buffering_participants(room_code).values())
+
+    def get_buffering_participant_ids(self, room_code: str) -> List[str]:
+        return list(self.get_buffering_participants(room_code).keys())
+
+    def is_room_buffering(self, room_code: str) -> bool:
+        return len(self._buffering_participants.get(room_code.upper(), {})) > 0
+
+    def add_buffering_participant(
+        self, room_code: str, participant_id: str, username: str
+    ) -> Tuple[bool, RoomPlaybackState]:
+        """
+        Records that participant_id is buffering.
+        If room was actively playing, automatically pauses playback for buffering.
+        Returns: (was_paused_by_this_call, state).
+        """
+        code = room_code.upper()
+        if code not in self._buffering_participants:
+            self._buffering_participants[code] = {}
+        self._buffering_participants[code][participant_id] = username
+
+        state = self.get_or_create_state(code)
+        was_playing = state.is_playing
+        if was_playing:
+            now = time.time()
+            state.current_time = state.compute_current_time(now)
+            state.is_playing = False
+            state.paused_for_buffering = True
+            state.updated_at = now
+            state.sequence_number += 1
+            return True, state
+        return False, state
+
+    def remove_buffering_participant(
+        self, room_code: str, participant_id: str
+    ) -> Tuple[bool, bool, RoomPlaybackState]:
+        """
+        Removes participant_id from buffering set.
+        If no buffering participants remain AND room was paused for buffering,
+        automatically resumes playback and increments sequence.
+        Returns: (was_removed, should_resume, state).
+        """
+        code = room_code.upper()
+        room_buf = self._buffering_participants.get(code, {})
+        was_removed = participant_id in room_buf
+        if was_removed:
+            del room_buf[participant_id]
+
+        state = self.get_or_create_state(code)
+        remaining = len(room_buf)
+        should_resume = False
+
+        if was_removed and remaining == 0 and state.paused_for_buffering:
+            now = time.time()
+            state.paused_for_buffering = False
+            state.is_playing = True
+            state.updated_at = now
+            state.sequence_number += 1
+            should_resume = True
+
+        return was_removed, should_resume, state
+
+    def clear_buffering_for_participant(
+        self, room_code: str, participant_id: str
+    ) -> Tuple[bool, bool, RoomPlaybackState]:
+        """Alias for remove_buffering_participant, used on disconnect or departure."""
+        return self.remove_buffering_participant(room_code, participant_id)
+
+    def clear_room_buffering(self, room_code: str) -> None:
+        code = room_code.upper()
+        if code in self._buffering_participants:
+            self._buffering_participants[code].clear()
+
+    # ---------------------------------------------------------------------------
+    # Action Processor
+    # ---------------------------------------------------------------------------
 
     def process_action(
         self,
@@ -124,6 +220,7 @@ class PlaybackManager:
                 state.current_time = state.compute_current_time(now)
 
             state.is_playing = True
+            state.paused_for_buffering = False  # Explicit play overrides buffering pause
             state.updated_at = now
             state.sequence_number += 1
             return state, None
@@ -141,6 +238,7 @@ class PlaybackManager:
                 state.current_time = state.compute_current_time(now)
 
             state.is_playing = False
+            state.paused_for_buffering = False  # Explicit pause overrides buffering pause
             state.updated_at = now
             state.sequence_number += 1
             return state, None
@@ -187,4 +285,3 @@ class PlaybackManager:
 
 # Authoritative playback manager singleton
 playback_manager = PlaybackManager()
-

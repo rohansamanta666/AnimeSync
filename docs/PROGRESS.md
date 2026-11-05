@@ -17,7 +17,7 @@
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
-| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 80% |
+| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 90% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -134,6 +134,17 @@
   - Programmatic execution lock (`isApplyingRemoteRef.current = true`): ensures drift adjustments (rate change or seek) NEVER emit outgoing `playback_action` socket events, preventing cascade feedback loops.
   - Drift observability telemetry: hook returns `driftSeconds` and `isNudging`; `RoomPage.tsx` displays live amber drift correction badge (`Syncing drift (XXXms)`).
   - 20 unit tests in `frontend/tests/drift.test.ts` verifying all thresholds, edge cases, pause behaviours, and custom playback rates.
+- [x] **Task 5.5: Buffering Detection & Recovery (`VideoPlayer.tsx`, `playback_manager.py`, `server.py`, `useVideoSync.ts`)**:
+  - Buffering event detection: `VideoPlayer.tsx` captures HTML5 `<video>` events `waiting`, `stalled`, `canplay`, and `playing`, debounced locally via `isLocalBufferingRef`.
+  - Server-authoritative buffering manager: `PlaybackManager` tracks `buffering_participants` per room and coordinates `paused_for_buffering` state.
+  - Server-coordinated shared pause: when any active participant buffers during playback, server transitions state to paused, increments sequence, and broadcasts `playback_sync(action="PAUSE", reason="buffering")` and `buffering_update`.
+  - Multi-participant buffering coordination: if multiple viewers buffer concurrently, room remains paused until the LAST buffering viewer finishes.
+  - Authoritative resume broadcast: when all participants finish buffering, server emits `playback_sync(action="PLAY", originating_socket_id="server", reason="buffering_resolved")` so all clients start together in lockstep.
+  - Automatic disconnect recovery: if a buffering participant disconnects or leaves, server clears their buffering hold and resumes playback for remaining viewers.
+  - Manual override safety: explicit user PAUSE or PLAY clears `paused_for_buffering`, respecting intentional user commands.
+  - Feedback loop prevention: `useVideoSync` suppresses drift evaluation during room buffering (`isRoomBuffering`).
+  - Buffering UI: Japanese dark theme spinner overlay on video stage displaying `Buffering: [usernames]`, plus pulsing status pill in room header.
+  - 7 automated tests added in `backend/tests/test_sync.py` covering buffering start/end, multi-client coordination, paused buffering, manual pause overrides, disconnect recovery, and unverified rejection.
 
 ---
 
@@ -143,13 +154,14 @@
   - Task 5.2: Completed.
   - Task 5.3: Completed.
   - Task 5.4: Completed.
-  - Task 5.5: Up next (Buffering Detection & Recovery).
+  - Task 5.5: Completed.
+  - Task 5.6: Up next (Manual Resync Button & Sync Health UI).
 
 ---
 
 ## 5. Pending Features
-- Task 5.5: Buffering detection and recovery.
-- Task 5.6: Resync button and Sync Health UI.
+- Task 5.6: Resync button and Sync Health UI (latency, drift ms, sync badge).
+- Task 5.7: Playback sync verification under simulated latency and packet drops.
 - Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
 - Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
@@ -167,7 +179,7 @@
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
-- `backend/tests/test_sync.py` (15 tests) — **PASSED**
+- `backend/tests/test_sync.py` (22 tests) — **PASSED**
   - `test_playback_manager_initial_state`: Initial state defaults.
   - `test_playback_manager_play_action`: PLAY action updates is_playing and sequence.
   - `test_playback_manager_pause_action`: PAUSE action updates is_playing and records position.
@@ -183,18 +195,24 @@
   - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
   - `test_get_playback_state_socket_handler`: Direct authoritative playback state querying via Socket.IO.
   - `test_authoritative_drift_formula_consistency`: Validates server authoritative time matches client drift thresholds.
+  - `test_playback_manager_buffering_coordination_and_recovery`: Unit test for shared pause on buffer and resume when all ready.
+  - `test_playback_manager_buffering_while_paused_no_autoresume`: Buffering while paused does not trigger auto-resume.
+  - `test_playback_manager_manual_pause_overrides_buffering_resume`: User manual pause cancels auto-resume.
+  - `test_socket_buffering_start_and_end_lifecycle`: Full Socket.IO buffering start and end lifecycle.
+  - `test_socket_buffering_multiple_participants_coordination`: Multi-participant buffering coordination (resumes only when last viewer ready).
+  - `test_socket_buffering_disconnect_recovery`: Disconnect during buffering automatically resumes remaining viewers.
+  - `test_socket_buffering_unverified_rejected`: Unverified participant cannot trigger buffering coordination.
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2117 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 35 backend tests + 20 frontend unit tests + Vite build)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 42 backend tests + 20 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 5 Task 5.5: Implement Buffering Detection & Recovery**:
-  1. Detect video element `waiting` / `canplay` / `stalled` events in `VideoPlayer.tsx`.
-  2. Implement `buffering_start` and `buffering_end` Socket.IO events to notify room participants.
-  3. Pause authoritative playback when a participant buffers (or show buffering indicator overlay) to keep both clients synchronized.
-  4. Automatically resume playback once all buffering participants have loaded enough frames.
+- **Phase 5 Task 5.6: Implement Manual Resync Button & Sync Health UI**:
+  1. Add "Resync" button to player controls to manually fetch authoritative server state and hard-seek if needed.
+  2. Implement Sync Health badge displaying live latency (ping/pong round-trip) and measured drift.
+  3. Provide quick visual confirmation of sync status ("Synced", "Nudging", "Buffering").
 
 ---
 
@@ -208,3 +226,4 @@
 - **Server-Authoritative Playback State Machine with Originating Socket ID**: `RoomPlaybackState` manages the single source of truth for time, speed, and play/pause state; broadcasting `originating_socket_id` eliminates feedback loops.
 - **Quadruple-Layered Loop Prevention**: `originating_socket_id` matching + monotonic sequence numbering + `isApplyingRemoteRef` hook guard + `isRemoteActionRef` player handle lock prevents any feedback loops during remote sync.
 - **Tiered Adaptive Playback Drift Correction**: Micro-drift ($0.25$s to $1.5$s) uses imperceptible $\pm 5\%$ speed nudges, completely avoiding jarring audio stutters or seeks; macro-drift ($\ge 1.5$s) immediately seeks. Intended speed is faithfully restored upon re-alignment.
+- **Server-Coordinated Buffering with Disconnect Recovery**: Shared pause triggered when any viewer buffers; playback resumes authoritatively with `originating_socket_id="server"` when all buffering viewers finish. Disconnecting viewers are automatically cleared so remaining viewers are never stalled indefinitely.

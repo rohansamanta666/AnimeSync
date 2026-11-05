@@ -62,6 +62,13 @@ Located in `backend/tests/`:
   - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
   - `test_get_playback_state_socket_handler`: Direct authoritative playback state querying via Socket.IO for client synchronization.
   - `test_authoritative_drift_formula_consistency`: Validates server authoritative elapsed time calculation matches client drift thresholds.
+  - `test_playback_manager_buffering_coordination_and_recovery`: Unit test verifying shared pause on buffering and auto-resumption when all buffering participants complete.
+  - `test_playback_manager_buffering_while_paused_no_autoresume`: Ensures buffering while paused does not start playback.
+  - `test_playback_manager_manual_pause_overrides_buffering_resume`: Ensures explicit manual pause cancels automatic buffering resumption.
+  - `test_socket_buffering_start_and_end_lifecycle`: Full socket event integration for `buffering_start` and `buffering_end`.
+  - `test_socket_buffering_multiple_participants_coordination`: Multi-participant buffering coordination verifying playback stays paused until the last buffering participant finishes.
+  - `test_socket_buffering_disconnect_recovery`: Verifies that if a buffering participant disconnects, remaining viewers resume automatically.
+  - `test_socket_buffering_unverified_rejected`: Verifies unverified participants cannot trigger buffering events.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:

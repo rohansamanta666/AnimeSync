@@ -55,7 +55,11 @@ This document outlines the execution roadmap across all 9 phases, specifying del
   - Drift < 0.25s: Ignore (or restore intended speed if previously nudged).
   - 0.25s – 1.5s: Gentle `playbackRate` nudge (±5%).
   - Drift >= 1.5s: Immediate hard seek.
-- [ ] Task 5.5: Implement buffering detection: notify server when either client buffers, with optional "pause both on buffer" setting.
+- [x] Task 5.5: Implement buffering detection and recovery:
+  - Detect HTML5 `waiting`, `stalled`, and `canplay` video events.
+  - Server-coordinated shared pause when any active participant buffers.
+  - Resume only when all active participants are ready.
+  - Automatic disconnect recovery and feedback loop prevention.
 - [ ] Task 5.6: Implement manual "Resync" button and Sync Health status indicator (latency, drift ms, sync status).
 - [ ] Task 5.7: Test playback sync under simulated latency and packet drops.
 

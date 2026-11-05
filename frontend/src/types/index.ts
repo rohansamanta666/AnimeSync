@@ -92,6 +92,17 @@ export interface PlaybackSyncPayload {
   originating_socket_id: string;
   origin_sid?: string;
   triggered_by?: string;
+  reason?: string;
+}
+
+export interface BufferingUpdatePayload {
+  room_code: string;
+  is_buffering: boolean;
+  buffering_participants: string[];
+  buffering_participant_ids?: string[];
+  paused_for_buffering?: boolean;
+  current_time?: number;
+  triggered_by?: string;
 }
 
 export interface ChatMessage {

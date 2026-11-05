@@ -67,6 +67,10 @@ export interface VideoPlayerProps {
   onWaiting?: () => void;
   onPlaying?: () => void;
   onEnded?: () => void;
+  /** Phase 5 Task 5.5: Buffering detection callbacks & remote participants */
+  onBufferingStart?: () => void;
+  onBufferingEnd?: () => void;
+  bufferingParticipants?: string[];
   /** Custom outer container class */
   className?: string;
 }
@@ -103,6 +107,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       onWaiting,
       onPlaying,
       onEnded,
+      onBufferingStart,
+      onBufferingEnd,
+      bufferingParticipants,
       className = '',
     },
     ref
@@ -493,10 +500,20 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onWaiting={() => {
             setIsBuffering(true);
             onWaiting?.();
+            onBufferingStart?.();
+          }}
+          onStalled={() => {
+            setIsBuffering(true);
+            onBufferingStart?.();
+          }}
+          onCanPlay={() => {
+            setIsBuffering(false);
+            onBufferingEnd?.();
           }}
           onPlaying={() => {
             setIsBuffering(false);
             onPlaying?.();
+            onBufferingEnd?.();
           }}
           onEnded={() => {
             setIsPlaying(false);
@@ -507,9 +524,19 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         />
 
         {/* Buffering spinner overlay */}
-        {isBuffering && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/40 backdrop-blur-sm z-20">
-            <div className="w-12 h-12 rounded-full border-3 border-violet-500 border-t-transparent animate-spin" />
+        {(isBuffering || (bufferingParticipants && bufferingParticipants.length > 0)) && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/60 backdrop-blur-sm z-20 transition-all">
+            <div className="w-14 h-14 rounded-full border-3 border-violet-500 border-t-transparent animate-spin mb-3 shadow-lg" />
+            <div className="text-center px-4 py-2 rounded-xl bg-void-950/80 border border-void-700/80 shadow-2xl">
+              <p className="text-xs font-mono font-bold text-violet-300">
+                {bufferingParticipants && bufferingParticipants.length > 0
+                  ? `Buffering: ${bufferingParticipants.join(', ')}`
+                  : 'Buffering video...'}
+              </p>
+              <p className="text-[10px] font-mono text-ink-muted mt-0.5">
+                Playback will resume automatically once all viewers are ready
+              </p>
+            </div>
           </div>
         )}
 

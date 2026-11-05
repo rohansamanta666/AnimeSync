@@ -1,8 +1,8 @@
 /**
- * useVideoSync — Phase 5 Tasks 5.3 & 5.4
+ * useVideoSync — Phase 5 Tasks 5.3, 5.4 & 5.5
  *
  * Client-to-Server Playback Controls, Sequence Number Loop Prevention,
- * and Adaptive Playback Drift Correction.
+ * Adaptive Playback Drift Correction, and Buffering Detection & Recovery.
  *
  * Task 5.3:
  * - Connects VideoPlayer controls (Play, Pause, Seek, Rate Change) to backend `playback_action`.
@@ -19,11 +19,18 @@
  *   - Ahead (drift > 0) -> -5% slow down (intendedRate * 0.95)
  * - Drift >= 1.5s: Macro-drift -> hard seek directly to authoritative position.
  * - Paused playback: Does not adjust rate when paused.
- * - Clean teardown and interval management.
+ *
+ * Task 5.5:
+ * - Buffering detection via waiting, stalled, and canplay video events.
+ * - Emits buffering_start and buffering_end to backend.
+ * - Server-coordinated shared pause when any participant buffers.
+ * - Listens for buffering_update to track active buffering participants.
+ * - Automatic resume only when all participants have finished buffering.
+ * - Drift evaluation inhibited during room buffering to prevent feedback loops.
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
-import { PlaybackActionType, PlaybackSyncPayload } from '../types';
+import { PlaybackActionType, PlaybackSyncPayload, BufferingUpdatePayload } from '../types';
 import { VideoPlayerHandle } from '../components/video/VideoPlayer';
 import {
   evaluateDriftCorrection,
@@ -48,6 +55,10 @@ export interface UseVideoSyncResult {
   handleSeek: (time: number) => void;
   /** Playback rate change callback to pass to VideoPlayer */
   handlePlaybackRateChange: (rate: number) => void;
+  /** Local buffering started callback to pass to VideoPlayer */
+  handleBufferingStart: () => void;
+  /** Local buffering ended callback to pass to VideoPlayer */
+  handleBufferingEnd: () => void;
   /** Monotonic server sequence number of the most recently applied action */
   currentSequence: number;
   /** Most recent applied playback action */
@@ -56,6 +67,10 @@ export interface UseVideoSyncResult {
   driftSeconds: number;
   /** Whether adaptive ±5% speed nudging is currently active */
   isNudging: boolean;
+  /** List of participant usernames currently buffering in the room */
+  bufferingParticipants: string[];
+  /** Whether the room is currently paused waiting for buffering to resolve */
+  isRoomBuffering: boolean;
 }
 
 export function useVideoSync({
@@ -68,6 +83,8 @@ export function useVideoSync({
   const [lastAction, setLastAction] = useState<PlaybackActionType | null>(null);
   const [driftSeconds, setDriftSeconds] = useState<number>(0);
   const [isNudging, setIsNudging] = useState<boolean>(false);
+  const [bufferingParticipants, setBufferingParticipants] = useState<string[]>([]);
+  const [isRoomBuffering, setIsRoomBuffering] = useState<boolean>(false);
 
   // Highest sequence number applied so far (avoids out-of-order or duplicate updates)
   const lastAppliedSequenceRef = useRef<number>(0);
@@ -86,6 +103,9 @@ export function useVideoSync({
 
   // Inactivity timestamp to prevent drift corrections right after user or remote actions
   const lastActionTimeRef = useRef<number>(0);
+
+  // Local buffering state ref to prevent duplicate socket emissions
+  const isLocalBufferingRef = useRef<boolean>(false);
 
   // 1. Client-to-server action emitters
   const handlePlay = useCallback(() => {
@@ -172,6 +192,35 @@ export function useVideoSync({
     [socket, isEnabled, roomCode]
   );
 
+  // Buffering emitters (Task 5.5)
+  const handleBufferingStart = useCallback(() => {
+    if (!socket || !isEnabled || !roomCode) return;
+    if (isLocalBufferingRef.current) return;
+    isLocalBufferingRef.current = true;
+
+    const player = playerRef.current;
+    const currentTime = player ? player.getCurrentTime() : 0;
+
+    socket.emit('buffering_start', {
+      room_code: roomCode.toUpperCase(),
+      current_time: currentTime,
+    });
+  }, [socket, isEnabled, roomCode, playerRef]);
+
+  const handleBufferingEnd = useCallback(() => {
+    if (!socket || !isEnabled || !roomCode) return;
+    if (!isLocalBufferingRef.current) return;
+    isLocalBufferingRef.current = false;
+
+    const player = playerRef.current;
+    const currentTime = player ? player.getCurrentTime() : 0;
+
+    socket.emit('buffering_end', {
+      room_code: roomCode.toUpperCase(),
+      current_time: currentTime,
+    });
+  }, [socket, isEnabled, roomCode, playerRef]);
+
   // 2. Fetch initial playback state when enabled
   useEffect(() => {
     if (!socket || !isEnabled) return;
@@ -226,7 +275,12 @@ export function useVideoSync({
       }
 
       // Rule 1: Ignore own socket actions to suppress self-echoes
-      if (data.originating_socket_id && socket.id && data.originating_socket_id === socket.id) {
+      // (Exception: actions originating from "server", e.g. buffering resolution, must be applied by all)
+      if (
+        data.originating_socket_id &&
+        socket.id &&
+        data.originating_socket_id === socket.id
+      ) {
         return;
       }
 
@@ -318,6 +372,13 @@ export function useVideoSync({
       }
     };
 
+    const handleBufferingUpdate = (data: BufferingUpdatePayload) => {
+      if (!data) return;
+      const list = data.buffering_participants || [];
+      setBufferingParticipants(list);
+      setIsRoomBuffering(!!data.is_buffering);
+    };
+
     const handleEpisodeChanged = () => {
       // Reset state on new episode
       lastAppliedSequenceRef.current = 0;
@@ -328,21 +389,30 @@ export function useVideoSync({
       isNudgingRef.current = false;
       setIsNudging(false);
       setDriftSeconds(0);
+      isLocalBufferingRef.current = false;
+      setBufferingParticipants([]);
+      setIsRoomBuffering(false);
     };
 
     socket.on('playback_sync', handlePlaybackSync);
     socket.on('playback_start', handlePlaybackStart);
+    socket.on('buffering_update', handleBufferingUpdate);
     socket.on('episode_changed', handleEpisodeChanged);
 
     return () => {
+      if (isLocalBufferingRef.current && roomCode) {
+        socket.emit('buffering_end', { room_code: roomCode.toUpperCase() });
+        isLocalBufferingRef.current = false;
+      }
       socket.off('playback_sync', handlePlaybackSync);
       socket.off('playback_start', handlePlaybackStart);
+      socket.off('buffering_update', handleBufferingUpdate);
       socket.off('episode_changed', handleEpisodeChanged);
     };
-  }, [socket, isEnabled, playerRef]);
+  }, [socket, isEnabled, playerRef, roomCode]);
 
-  // 4. Adaptive Playback Drift Correction Engine (Task 5.4)
-  // Runs every 2 seconds during active playback
+  // 4. Adaptive Playback Drift Correction Engine (Task 5.4 & 5.5)
+  // Runs every 2 seconds during active playback; inhibited during buffering
   useEffect(() => {
     if (!socket || !isEnabled) return;
 
@@ -361,8 +431,8 @@ export function useVideoSync({
       const isLocalPaused = player.isPaused();
       const snapshot = authoritativeSnapshotRef.current;
 
-      // If paused locally or on server: do not adjust rate, restore rate if previously nudged
-      if (!snapshot || !snapshot.isPlaying || isLocalPaused) {
+      // If paused locally or on server or room is buffering: do not adjust rate, restore rate if previously nudged
+      if (!snapshot || !snapshot.isPlaying || isLocalPaused || isRoomBuffering) {
         if (isNudgingRef.current) {
           isApplyingRemoteRef.current = true;
           player.setPlaybackRate(userPlaybackRateRef.current);
@@ -436,16 +506,20 @@ export function useVideoSync({
         isNudgingRef.current = false;
       }
     };
-  }, [socket, isEnabled, playerRef]);
+  }, [socket, isEnabled, playerRef, isRoomBuffering]);
 
   return {
     handlePlay,
     handlePause,
     handleSeek,
     handlePlaybackRateChange,
+    handleBufferingStart,
+    handleBufferingEnd,
     currentSequence,
     lastAction,
     driftSeconds,
     isNudging,
+    bufferingParticipants,
+    isRoomBuffering,
   };
 }

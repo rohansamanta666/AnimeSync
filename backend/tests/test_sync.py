@@ -42,7 +42,14 @@ from backend.app.sockets.playback_manager import (
     playback_manager,
 )
 from backend.app.sockets.connection_manager import connection_manager
-from backend.app.sockets.server import playback_action, get_playback_state, sio
+from backend.app.sockets.server import (
+    playback_action,
+    get_playback_state,
+    buffering_start,
+    buffering_end,
+    disconnect,
+    sio,
+)
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -477,6 +484,284 @@ def test_authoritative_drift_formula_consistency():
     # Local player at 17.0s -> drift = 17.0 - 15.0 = +2.0s (hard seek required)
     drift_macro = 17.0 - auth_time
     assert drift_macro == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.5: Buffering Detection & Recovery Tests
+# ---------------------------------------------------------------------------
+
+def test_playback_manager_buffering_coordination_and_recovery():
+    """PlaybackManager coordinates shared pause when buffering and resumes when all ready."""
+    pm = PlaybackManager()
+    room = "BUF_ROOM"
+
+    # 1. Start playback
+    state = pm.get_or_create_state(room)
+    state.is_playing = True
+    state.current_time = 10.0
+    state.updated_at = time.time()
+    state.sequence_number = 1
+
+    # 2. Participant 1 starts buffering -> shared pause
+    was_paused, state = pm.add_buffering_participant(room, "p1", "User1")
+    assert was_paused is True
+    assert state.is_playing is False
+    assert state.paused_for_buffering is True
+    assert state.sequence_number == 2
+    assert pm.is_room_buffering(room) is True
+    assert pm.get_buffering_usernames(room) == ["User1"]
+
+    # 3. Participant 2 also starts buffering -> no second pause, but recorded
+    was_paused2, state = pm.add_buffering_participant(room, "p2", "User2")
+    assert was_paused2 is False
+    assert state.is_playing is False
+    assert state.sequence_number == 2  # No duplicate sequence increment
+    assert set(pm.get_buffering_usernames(room)) == {"User1", "User2"}
+
+    # 4. Participant 1 finishes buffering -> p2 still buffering, do NOT resume
+    was_removed, should_resume, state = pm.remove_buffering_participant(room, "p1")
+    assert was_removed is True
+    assert should_resume is False
+    assert state.is_playing is False
+    assert state.paused_for_buffering is True
+    assert pm.get_buffering_usernames(room) == ["User2"]
+
+    # 5. Participant 2 finishes buffering -> all ready, auto-resumes!
+    was_removed2, should_resume2, state = pm.remove_buffering_participant(room, "p2")
+    assert was_removed2 is True
+    assert should_resume2 is True
+    assert state.is_playing is True
+    assert state.paused_for_buffering is False
+    assert state.sequence_number == 3
+    assert pm.is_room_buffering(room) is False
+
+
+def test_playback_manager_buffering_while_paused_no_autoresume():
+    """Buffering while playback is already paused should NOT trigger auto-resume."""
+    pm = PlaybackManager()
+    room = "PAUSED_BUF"
+
+    state = pm.get_or_create_state(room)
+    state.is_playing = False
+    state.current_time = 5.0
+    state.sequence_number = 1
+
+    # Participant buffers while paused (e.g. seeking)
+    was_paused, state = pm.add_buffering_participant(room, "p1", "User1")
+    assert was_paused is False
+    assert state.paused_for_buffering is False
+    assert state.sequence_number == 1
+
+    # Buffering finishes -> must NOT start playing
+    was_removed, should_resume, state = pm.remove_buffering_participant(room, "p1")
+    assert was_removed is True
+    assert should_resume is False
+    assert state.is_playing is False
+
+
+def test_playback_manager_manual_pause_overrides_buffering_resume():
+    """If user manually pauses while video was paused for buffering, do NOT auto-resume."""
+    pm = PlaybackManager()
+    room = "OVERRIDE_BUF"
+
+    state = pm.get_or_create_state(room)
+    state.is_playing = True
+    pm.add_buffering_participant(room, "p1", "User1")
+    assert state.paused_for_buffering is True
+
+    # User explicitly clicks PAUSE
+    pm.process_action(room, "PAUSE", timestamp=10.0)
+    assert state.paused_for_buffering is False
+
+    # Buffering finishes -> must remain paused
+    was_removed, should_resume, state = pm.remove_buffering_participant(room, "p1")
+    assert was_removed is True
+    assert should_resume is False
+    assert state.is_playing is False
+
+
+@pytest.mark.asyncio
+async def test_socket_buffering_start_and_end_lifecycle():
+    """Socket handlers buffering_start and buffering_end coordinate shared pause and resume."""
+    room = await _make_room("Buffering Socket Room")
+    p1 = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room.id, "Friend", ParticipantStatus.WATCHING)
+
+    sid1 = "sid_host_buf"
+    sid2 = "sid_friend_buf"
+    await connection_manager.register_connection(
+        sid=sid1, room_code=room.code, room_id=room.id,
+        participant_id=p1.id, username="Host", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid2, room_code=room.code, room_id=room.id,
+        participant_id=p2.id, username="Friend", is_host=False
+    )
+
+    # Start playback
+    await playback_action(sid1, {"action": "PLAY", "timestamp": 10.0})
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit:
+        # Friend buffers -> shared pause broadcast
+        res = await buffering_start(sid2, {"room_code": room.code, "current_time": 10.5})
+        assert res["status"] == "OK"
+        assert res["is_buffering"] is True
+        assert res["paused"] is True
+
+        calls = mock_emit.call_args_list
+        sync_calls = [c for c in calls if c[0][0] == "playback_sync"]
+        buf_calls = [c for c in calls if c[0][0] == "buffering_update"]
+
+        assert len(sync_calls) == 1
+        assert sync_calls[0][0][1]["action"] == "PAUSE"
+        assert sync_calls[0][0][1]["reason"] == "buffering"
+
+        assert len(buf_calls) == 1
+        assert buf_calls[0][0][1]["is_buffering"] is True
+        assert buf_calls[0][0][1]["buffering_participants"] == ["Friend"]
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit_resume:
+        # Friend finishes buffering -> shared resume broadcast
+        res_end = await buffering_end(sid2, {"room_code": room.code, "current_time": 10.5})
+        assert res_end["status"] == "OK"
+        assert res_end["resumed"] is True
+
+        calls_res = mock_emit_resume.call_args_list
+        sync_calls_res = [c for c in calls_res if c[0][0] == "playback_sync"]
+        buf_calls_res = [c for c in calls_res if c[0][0] == "buffering_update"]
+
+        assert len(sync_calls_res) == 1
+        assert sync_calls_res[0][0][1]["action"] == "PLAY"
+        assert sync_calls_res[0][0][1]["originating_socket_id"] == "server"
+        assert sync_calls_res[0][0][1]["reason"] == "buffering_resolved"
+
+        assert len(buf_calls_res) == 1
+        assert buf_calls_res[0][0][1]["is_buffering"] is False
+        assert buf_calls_res[0][0][1]["buffering_participants"] == []
+
+    await connection_manager.unregister_connection(sid1)
+    await connection_manager.unregister_connection(sid2)
+
+
+@pytest.mark.asyncio
+async def test_socket_buffering_multiple_participants_coordination():
+    """Resume occurs only when ALL buffering participants in room have finished."""
+    room = await _make_room("Multi Buf Room")
+    p1 = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room.id, "Friend", ParticipantStatus.WATCHING)
+
+    sid1 = "sid_multi_1"
+    sid2 = "sid_multi_2"
+    await connection_manager.register_connection(
+        sid=sid1, room_code=room.code, room_id=room.id,
+        participant_id=p1.id, username="Host", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid2, room_code=room.code, room_id=room.id,
+        participant_id=p2.id, username="Friend", is_host=False
+    )
+
+    # Playing
+    await playback_action(sid1, {"action": "PLAY", "timestamp": 20.0})
+
+    # Both start buffering
+    await buffering_start(sid1, {"room_code": room.code})
+    await buffering_start(sid2, {"room_code": room.code})
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit:
+        # Host finishes buffering -> Friend is still buffering -> NO resume
+        res = await buffering_end(sid1, {"room_code": room.code})
+        assert res["status"] == "OK"
+        assert res["resumed"] is False
+
+        # Ensure NO playback_sync PLAY was emitted
+        play_calls = [
+            c for c in mock_emit.call_args_list
+            if c[0][0] == "playback_sync" and c[0][1].get("action") == "PLAY"
+        ]
+        assert len(play_calls) == 0
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit_final:
+        # Friend finishes buffering -> LAST buffering participant -> RESUMES
+        res2 = await buffering_end(sid2, {"room_code": room.code})
+        assert res2["status"] == "OK"
+        assert res2["resumed"] is True
+
+        play_calls2 = [
+            c for c in mock_emit_final.call_args_list
+            if c[0][0] == "playback_sync" and c[0][1].get("action") == "PLAY"
+        ]
+        assert len(play_calls2) == 1
+        assert play_calls2[0][0][1]["originating_socket_id"] == "server"
+
+    await connection_manager.unregister_connection(sid1)
+    await connection_manager.unregister_connection(sid2)
+
+
+@pytest.mark.asyncio
+async def test_socket_buffering_disconnect_recovery():
+    """When a buffering participant disconnects, remaining viewers resume playback cleanly."""
+    room = await _make_room("Disconnect Buf Room")
+    p1 = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room.id, "Friend", ParticipantStatus.WATCHING)
+
+    sid1 = "sid_disc_host"
+    sid2 = "sid_disc_friend"
+    await connection_manager.register_connection(
+        sid=sid1, room_code=room.code, room_id=room.id,
+        participant_id=p1.id, username="Host", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid2, room_code=room.code, room_id=room.id,
+        participant_id=p2.id, username="Friend", is_host=False
+    )
+
+    # Start playing
+    await playback_action(sid1, {"action": "PLAY", "timestamp": 35.0})
+
+    # Friend starts buffering -> room pauses
+    await buffering_start(sid2, {"room_code": room.code})
+
+    state = playback_manager.get_or_create_state(room.code)
+    assert state.is_playing is False
+    assert state.paused_for_buffering is True
+
+    # Friend disconnects unexpectedly!
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit:
+        await disconnect(sid2)
+
+        # Remaining viewer (Host) must receive playback_sync PLAY resume
+        play_calls = [
+            c for c in mock_emit.call_args_list
+            if c[0][0] == "playback_sync" and c[0][1].get("action") == "PLAY"
+        ]
+        assert len(play_calls) == 1
+        assert play_calls[0][0][1]["reason"] == "buffering_disconnect_recovery"
+
+        state_after = playback_manager.get_or_create_state(room.code)
+        assert state_after.is_playing is True
+        assert state_after.paused_for_buffering is False
+
+    await connection_manager.unregister_connection(sid1)
+
+
+@pytest.mark.asyncio
+async def test_socket_buffering_unverified_rejected():
+    """Unverified participant cannot trigger buffering coordination."""
+    room = await _make_room("Unverified Buf Room")
+    p = await _make_participant(room.id, "Guest", ParticipantStatus.WAITING_FOR_FILE)
+    sid = "sid_unverified_buf"
+    await connection_manager.register_connection(
+        sid=sid, room_code=room.code, room_id=room.id,
+        participant_id=p.id, username="Guest", is_host=False
+    )
+
+    res = await buffering_start(sid, {"room_code": room.code})
+    assert res["status"] == "ERROR"
+    assert "cannot participate in buffering sync" in res["message"]
+
+    await connection_manager.unregister_connection(sid)
+
 
 
 

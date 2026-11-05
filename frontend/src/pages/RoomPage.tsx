@@ -128,10 +128,14 @@ export const RoomPage: React.FC = () => {
     handlePause,
     handleSeek,
     handlePlaybackRateChange,
+    handleBufferingStart,
+    handleBufferingEnd,
     currentSequence,
     lastAction,
     driftSeconds,
     isNudging,
+    bufferingParticipants,
+    isRoomBuffering,
   } = useVideoSync({
     socket,
     playerRef: videoPlayerRef,
@@ -347,6 +351,9 @@ export const RoomPage: React.FC = () => {
                 onPause={handlePause}
                 onSeek={handleSeek}
                 onPlaybackRateChange={handlePlaybackRateChange}
+                onBufferingStart={handleBufferingStart}
+                onBufferingEnd={handleBufferingEnd}
+                bufferingParticipants={bufferingParticipants}
               />
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
@@ -406,6 +413,15 @@ export const RoomPage: React.FC = () => {
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 flex items-center gap-1.5 shadow-sm animate-pulse">
                       <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                       <span>Syncing drift ({Math.round(driftSeconds * 1000)}ms)</span>
+                    </span>
+                  )}
+                  {/* Buffering Coordination Status Indicator */}
+                  {isRoomBuffering && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950/80 text-violet-300 border border-violet-800/80 flex items-center gap-1.5 shadow-sm animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                      <span>
+                        Buffering: {bufferingParticipants.length > 0 ? bufferingParticipants.join(', ') : 'Waiting...'}
+                      </span>
                     </span>
                   )}
                   {/* Countdown preview in bar when active */}

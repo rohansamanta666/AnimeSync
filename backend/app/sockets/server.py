@@ -84,6 +84,86 @@ async def disconnect(sid: str):
                 room=session.room_code
             )
 
+            # Phase 5 Task 5.5: Clean up buffering state on departure
+            was_buf_removed, should_resume, state = playback_manager.clear_buffering_for_participant(
+                session.room_code, session.participant_id
+            )
+            if was_buf_removed:
+                active_ids = connection_manager.get_room_active_participant_ids(session.room_code)
+                remaining_active = [pid for pid in active_ids if pid != session.participant_id]
+                if should_resume and len(remaining_active) > 0:
+                    resume_payload = {
+                        "room_code": session.room_code,
+                        "action": "PLAY",
+                        "timestamp": state.current_time,
+                        "current_time": state.current_time,
+                        "is_playing": True,
+                        "playback_rate": state.playback_speed,
+                        "playback_speed": state.playback_speed,
+                        "server_sequence": state.sequence_number,
+                        "sequence_number": state.sequence_number,
+                        "server_time": state.updated_at,
+                        "updated_at": state.updated_at,
+                        "originating_socket_id": "server",
+                        "reason": "buffering_disconnect_recovery",
+                        "triggered_by": "server",
+                    }
+                    await sio.emit("playback_sync", resume_payload, room=session.room_code)
+                elif should_resume and len(remaining_active) == 0:
+                    state.paused_for_buffering = False
+                    state.is_playing = False
+
+                buffering_payload = {
+                    "room_code": session.room_code,
+                    "is_buffering": playback_manager.is_room_buffering(session.room_code),
+                    "buffering_participants": playback_manager.get_buffering_usernames(session.room_code),
+                    "buffering_participant_ids": playback_manager.get_buffering_participant_ids(session.room_code),
+                    "paused_for_buffering": state.paused_for_buffering,
+                    "current_time": state.current_time,
+                    "triggered_by": session.username,
+                }
+                await sio.emit("buffering_update", buffering_payload, room=session.room_code)
+
+        # Phase 5 Task 5.5: Clean up buffering state on disconnect
+        was_buf_removed, should_resume, state = playback_manager.clear_buffering_for_participant(
+            session.room_code, session.participant_id
+        )
+        if was_buf_removed:
+            active_ids = connection_manager.get_room_active_participant_ids(session.room_code)
+            remaining_active = [pid for pid in active_ids if pid != session.participant_id]
+            if should_resume and len(remaining_active) > 0:
+                resume_payload = {
+                    "room_code": session.room_code,
+                    "action": "PLAY",
+                    "timestamp": state.current_time,
+                    "current_time": state.current_time,
+                    "is_playing": True,
+                    "playback_rate": state.playback_speed,
+                    "playback_speed": state.playback_speed,
+                    "server_sequence": state.sequence_number,
+                    "sequence_number": state.sequence_number,
+                    "server_time": state.updated_at,
+                    "updated_at": state.updated_at,
+                    "originating_socket_id": "server",
+                    "reason": "buffering_disconnect_recovery",
+                    "triggered_by": "server",
+                }
+                await sio.emit("playback_sync", resume_payload, room=session.room_code)
+            elif should_resume and len(remaining_active) == 0:
+                state.paused_for_buffering = False
+                state.is_playing = False
+
+            buffering_payload = {
+                "room_code": session.room_code,
+                "is_buffering": playback_manager.is_room_buffering(session.room_code),
+                "buffering_participants": playback_manager.get_buffering_usernames(session.room_code),
+                "buffering_participant_ids": playback_manager.get_buffering_participant_ids(session.room_code),
+                "paused_for_buffering": state.paused_for_buffering,
+                "current_time": state.current_time,
+                "triggered_by": session.username,
+            }
+            await sio.emit("buffering_update", buffering_payload, room=session.room_code)
+
 @sio.event
 async def join_room(sid: str, data: dict):
     return await handle_join_room(sid, data)
@@ -266,6 +346,46 @@ async def leave_room(sid: str, data: dict = None):
                 },
                 room=session.room_code
             )
+
+            # Phase 5 Task 5.5: Clean up buffering state on departure
+            was_buf_removed, should_resume, state = playback_manager.clear_buffering_for_participant(
+                session.room_code, session.participant_id
+            )
+            if was_buf_removed:
+                active_ids = connection_manager.get_room_active_participant_ids(session.room_code)
+                remaining_active = [pid for pid in active_ids if pid != session.participant_id]
+                if should_resume and len(remaining_active) > 0:
+                    resume_payload = {
+                        "room_code": session.room_code,
+                        "action": "PLAY",
+                        "timestamp": state.current_time,
+                        "current_time": state.current_time,
+                        "is_playing": True,
+                        "playback_rate": state.playback_speed,
+                        "playback_speed": state.playback_speed,
+                        "server_sequence": state.sequence_number,
+                        "sequence_number": state.sequence_number,
+                        "server_time": state.updated_at,
+                        "updated_at": state.updated_at,
+                        "originating_socket_id": "server",
+                        "reason": "buffering_disconnect_recovery",
+                        "triggered_by": "server",
+                    }
+                    await sio.emit("playback_sync", resume_payload, room=session.room_code)
+                elif should_resume and len(remaining_active) == 0:
+                    state.paused_for_buffering = False
+                    state.is_playing = False
+
+                buffering_payload = {
+                    "room_code": session.room_code,
+                    "is_buffering": playback_manager.is_room_buffering(session.room_code),
+                    "buffering_participants": playback_manager.get_buffering_usernames(session.room_code),
+                    "buffering_participant_ids": playback_manager.get_buffering_participant_ids(session.room_code),
+                    "paused_for_buffering": state.paused_for_buffering,
+                    "current_time": state.current_time,
+                    "triggered_by": session.username,
+                }
+                await sio.emit("buffering_update", buffering_payload, room=session.room_code)
 
     await sio.emit("room_left", {"room_code": session.room_code}, to=sid)
     return {"success": True}
@@ -761,4 +881,157 @@ async def get_playback_state(sid: str, data: dict = None):
         return {"status": "ERROR", "message": "Socket session unauthenticated"}
     state = playback_manager.get_or_create_state(session.room_code)
     return {"status": "OK", "state": state.to_dict()}
+
+
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.5: Buffering Detection & Recovery
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def buffering_start(sid: str, data: dict = None):
+    """
+    Socket handler when a participant's local video enters buffering (waiting/stalled).
+    If the room is actively playing, pauses playback across all participants to prevent desync.
+    Broadcasts buffering_update and (if state changed to paused) playback_sync(PAUSE).
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    req_room_code = (data.get("room_code") if isinstance(data, dict) else "") or ""
+    if req_room_code and req_room_code.strip().upper() != session.room_code:
+        return {
+            "status": "ERROR",
+            "message": f"Room code mismatch: authorized for '{session.room_code}', cannot act on '{req_room_code}'",
+        }
+
+    # Verify participant has verified file / is watching
+    async with AsyncSessionLocal() as db:
+        p_query = select(Participant).where(Participant.id == session.participant_id)
+        p_res = await db.execute(p_query)
+        participant = p_res.scalar_one_or_none()
+        if not participant:
+            return {"status": "ERROR", "message": "Participant not found"}
+
+        unverified_statuses = {
+            ParticipantStatus.WAITING_FOR_FILE,
+            ParticipantStatus.DOWNLOADING,
+            ParticipantStatus.DOWNLOADED,
+            ParticipantStatus.VERIFYING,
+            ParticipantStatus.VERIFICATION_FAILED,
+        }
+        if participant.status in unverified_statuses:
+            return {
+                "status": "ERROR",
+                "message": f"Participant status '{participant.status.value}' cannot participate in buffering sync",
+            }
+
+    was_paused, state = playback_manager.add_buffering_participant(
+        session.room_code, session.participant_id, session.username
+    )
+
+    if was_paused:
+        # Broadcast authoritative PAUSE to all participants with reason="buffering"
+        pause_payload = {
+            "room_code": session.room_code,
+            "action": "PAUSE",
+            "timestamp": state.current_time,
+            "current_time": state.current_time,
+            "is_playing": False,
+            "playback_rate": state.playback_speed,
+            "playback_speed": state.playback_speed,
+            "server_sequence": state.sequence_number,
+            "sequence_number": state.sequence_number,
+            "server_time": state.updated_at,
+            "updated_at": state.updated_at,
+            "originating_socket_id": sid,
+            "reason": "buffering",
+            "triggered_by": session.username,
+        }
+        await sio.emit("playback_sync", pause_payload, room=session.room_code)
+
+    buffering_payload = {
+        "room_code": session.room_code,
+        "is_buffering": True,
+        "buffering_participants": playback_manager.get_buffering_usernames(session.room_code),
+        "buffering_participant_ids": playback_manager.get_buffering_participant_ids(session.room_code),
+        "paused_for_buffering": state.paused_for_buffering,
+        "current_time": state.current_time,
+        "triggered_by": session.username,
+    }
+    await sio.emit("buffering_update", buffering_payload, room=session.room_code)
+
+    return {
+        "status": "OK",
+        "is_buffering": True,
+        "paused": was_paused,
+        "buffering_participants": buffering_payload["buffering_participants"],
+    }
+
+
+@sio.event
+async def buffering_end(sid: str, data: dict = None):
+    """
+    Socket handler when a participant finishes buffering (canplay/playing).
+    Removes participant from buffering list.
+    If all participants in the room are ready and playback was paused for buffering,
+    authoritatively resumes playback with playback_sync(PLAY) and updates buffering state.
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    req_room_code = (data.get("room_code") if isinstance(data, dict) else "") or ""
+    if req_room_code and req_room_code.strip().upper() != session.room_code:
+        return {
+            "status": "ERROR",
+            "message": f"Room code mismatch: authorized for '{session.room_code}', cannot act on '{req_room_code}'",
+        }
+
+    was_removed, should_resume, state = playback_manager.remove_buffering_participant(
+        session.room_code, session.participant_id
+    )
+
+    if not was_removed:
+        return {"status": "OK", "message": "Participant was not recorded as buffering"}
+
+    if should_resume:
+        # Broadcast authoritative PLAY to all participants (originating from "server")
+        resume_payload = {
+            "room_code": session.room_code,
+            "action": "PLAY",
+            "timestamp": state.current_time,
+            "current_time": state.current_time,
+            "is_playing": True,
+            "playback_rate": state.playback_speed,
+            "playback_speed": state.playback_speed,
+            "server_sequence": state.sequence_number,
+            "sequence_number": state.sequence_number,
+            "server_time": state.updated_at,
+            "updated_at": state.updated_at,
+            "originating_socket_id": "server",
+            "reason": "buffering_resolved",
+            "triggered_by": "server",
+        }
+        await sio.emit("playback_sync", resume_payload, room=session.room_code)
+
+    is_buffering = playback_manager.is_room_buffering(session.room_code)
+    buffering_payload = {
+        "room_code": session.room_code,
+        "is_buffering": is_buffering,
+        "buffering_participants": playback_manager.get_buffering_usernames(session.room_code),
+        "buffering_participant_ids": playback_manager.get_buffering_participant_ids(session.room_code),
+        "paused_for_buffering": state.paused_for_buffering,
+        "current_time": state.current_time,
+        "triggered_by": session.username,
+    }
+    await sio.emit("buffering_update", buffering_payload, room=session.room_code)
+
+    return {
+        "status": "OK",
+        "resumed": should_resume,
+        "is_buffering": is_buffering,
+        "buffering_participants": buffering_payload["buffering_participants"],
+    }
+
 
