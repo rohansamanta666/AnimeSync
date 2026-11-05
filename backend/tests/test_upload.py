@@ -223,3 +223,4 @@ async def test_unauthorized_download_prevention():
             params={"participant_id": host2.id, "token": token2}
         )
         assert bad_download.status_code == 403
+

@@ -127,3 +127,4 @@ export function useFileHasher(): UseFileHasherResult {
     reset,
   };
 }
+

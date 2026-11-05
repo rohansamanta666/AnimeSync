@@ -167,3 +167,4 @@ export class StreamingSHA256 {
     return hex;
   }
 }
+

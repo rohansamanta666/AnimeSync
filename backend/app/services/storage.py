@@ -261,3 +261,4 @@ class StorageService:
             shutil.rmtree(upload_dir, ignore_errors=True)
             return True
         return False
+
