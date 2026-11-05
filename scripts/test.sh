@@ -11,9 +11,11 @@ echo "1. Running backend pytest suite..."
 source .venv/bin/activate
 PYTHONPATH=. pytest backend/tests -W ignore::DeprecationWarning
 
-# 2. Frontend Build Verification
-echo "2. Running frontend TypeScript & build check..."
+# 2. Frontend Unit Tests & Build Verification
+echo "2. Running frontend unit tests..."
 cd frontend
+npm test
+echo "3. Running frontend TypeScript & build check..."
 npm run build
 cd "$PROJECT_ROOT"
 

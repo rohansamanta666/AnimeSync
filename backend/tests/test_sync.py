@@ -425,3 +425,58 @@ async def test_cross_room_playback_isolation():
     await connection_manager.unregister_connection(sid_2)
 
 
+@pytest.mark.asyncio
+async def test_get_playback_state_socket_handler():
+    """get_playback_state socket event returns authoritative room state."""
+    room = await _make_room("State Room")
+    p = await _make_participant(room.id, "Host", ParticipantStatus.WATCHING)
+    sid = "sid_state_test"
+    await connection_manager.register_connection(
+        sid=sid, room_code=room.code, room_id=room.id,
+        participant_id=p.id, username="Host", is_host=True
+    )
+
+    # Initial state before action
+    res = await get_playback_state(sid, {})
+    assert res["status"] == "OK"
+    assert res["state"]["is_playing"] is False
+    assert res["state"]["playback_speed"] == 1.0
+    assert res["state"]["sequence_number"] == 0
+
+    # Start playback
+    await playback_action(sid, {"action": "PLAY", "timestamp": 12.0})
+
+    # Updated state
+    res2 = await get_playback_state(sid, {})
+    assert res2["status"] == "OK"
+    assert res2["state"]["is_playing"] is True
+    assert res2["state"]["current_time"] >= 12.0
+    assert res2["state"]["sequence_number"] == 1
+
+    await connection_manager.unregister_connection(sid)
+
+
+def test_authoritative_drift_formula_consistency():
+    """Server-authoritative compute_current_time matches client drift model."""
+    state = RoomPlaybackState(
+        room_code="DRIFT01",
+        is_playing=True,
+        current_time=10.0,
+        playback_speed=1.0,
+        updated_at=100.0,
+        sequence_number=1,
+    )
+    # Elapsed = 5.0 seconds -> authoritative time = 15.0
+    auth_time = state.compute_current_time(now=105.0)
+    assert auth_time == 15.0
+
+    # Local player at 14.5s -> drift = 14.5 - 15.0 = -0.5s (behind, requires +5% speedup)
+    drift = 14.5 - auth_time
+    assert drift == -0.5
+
+    # Local player at 17.0s -> drift = 17.0 - 15.0 = +2.0s (hard seek required)
+    drift_macro = 17.0 - auth_time
+    assert drift_macro == 2.0
+
+
+

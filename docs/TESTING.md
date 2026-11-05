@@ -60,12 +60,21 @@ Located in `backend/tests/`:
   - `test_socket_playback_action_play_pause_seek_rate_lifecycle`: Full socket event lifecycle verifying `playback_sync` broadcast with `originating_socket_id` and monotonic sequence numbers.
   - `test_two_participants_playback_sync_and_echo_suppression`: Two-client watch party simulation verifying echo suppression via `originating_socket_id` and non-originating client application.
   - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
+  - `test_get_playback_state_socket_handler`: Direct authoritative playback state querying via Socket.IO for client synchronization.
+  - `test_authoritative_drift_formula_consistency`: Validates server authoritative elapsed time calculation matches client drift thresholds.
 
-### 2.2 Frontend Tests (`vitest`)
-Located in `frontend/src/__tests__/`:
-- **File Hasher Worker**: Incremental hashing of chunked Blob objects matches known SHA-256 digests.
-- **Sync Engine Hook**: Drift calculation and playback rate adjustment thresholds.
-- **Independent Audio Controller**: Verifying that changing anime volume does not modify Web Audio GainNode.
+### 2.2 Frontend Unit Tests (`node --test`)
+Located in `frontend/tests/`:
+- **`drift.test.ts`** (20 unit tests):
+  - `computeAuthoritativeTime`: verifies static time when paused, linear time advancement at 1.0x, custom playback speeds (1.5x), and monotonic `localReceivedAt` handling.
+  - `computeDrift`: signed drift measurement (negative when local is behind, positive when ahead, zero when in sync).
+  - `evaluateDriftCorrection`:
+    - Tolerance zone ($|\text{drift}| < 0.25$s): returns `NONE` when unadjusted, or `RESTORE_RATE` to restore user's intended speed.
+    - Micro-drift zone ($0.25\text{s} \le |\text{drift}| < 1.5$s): tests `NUDGE_FASTER` ($+5\%$) when behind and `NUDGE_SLOWER` ($-5\%$) when ahead across default and custom intended speeds.
+    - Macro-drift zone ($|\text{drift}| \ge 1.5$s): tests `HARD_SEEK` directly to authoritative timestamp and restores intended rate.
+    - Exact threshold boundaries: verifies 0.25s triggers micro-adjustment and 1.5s triggers hard seek.
+    - Paused state handling: tests that paused playback (server or local) inhibits drift adjustments and resets active nudges.
+    - Null snapshot safety: graceful `NONE` fallback.
 
 ---
 

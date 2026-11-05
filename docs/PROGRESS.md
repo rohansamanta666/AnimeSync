@@ -17,7 +17,7 @@
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
-| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 60% |
+| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 80% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -121,6 +121,19 @@
   - Programmatic event suppression (`isApplyingRemoteRef` & `isRemoteActionRef`): prevents remote handle calls (`play()`, `pause()`, `seek()`) from re-triggering outgoing socket events.
   - Real-time sync feedback badge (`Sync #Seq (ACTION)`) displayed in the room lobby bar.
   - Fully verified across multi-client simulated watch parties.
+- [x] **Task 5.4: Adaptive Playback Drift Correction Engine (`drift.ts` & `useVideoSync.ts`)**:
+  - Dedicated drift service `frontend/src/services/drift.ts` implementing authoritative timeline formulas, signed drift measurement, and tiered threshold evaluation.
+  - Authoritative time computation: advances timeline based on server `updated_at` (or local receive timestamp) and authoritative `playback_speed`.
+  - Tiered correction engine:
+    - **Drift < 0.25s**: Within tolerance. Do nothing; if previously nudging, smoothly restores user's intended playback speed.
+    - **0.25s to < 1.5s (Micro-Drift)**: Applies temporary ±5% playback speed adjustment (`intendedRate * 1.05` when local is behind; `intendedRate * 0.95` when local is ahead).
+    - **Drift >= 1.5s (Macro-Drift)**: Immediately hard-seeks directly to authoritative timestamp and restores intended rate.
+  - 2-second periodic evaluation timer (`DRIFT_CHECK_INTERVAL_MS = 2000`) active only during active playback.
+  - Paused playback handling: strictly avoids rate adjustments while paused, and restores intended speed if paused while nudging.
+  - Inactivity cooldown (`DRIFT_ACTION_COOLDOWN_MS = 1200ms`): suppresses drift checks immediately following manual or remote playback actions to allow transitions to settle.
+  - Programmatic execution lock (`isApplyingRemoteRef.current = true`): ensures drift adjustments (rate change or seek) NEVER emit outgoing `playback_action` socket events, preventing cascade feedback loops.
+  - Drift observability telemetry: hook returns `driftSeconds` and `isNudging`; `RoomPage.tsx` displays live amber drift correction badge (`Syncing drift (XXXms)`).
+  - 20 unit tests in `frontend/tests/drift.test.ts` verifying all thresholds, edge cases, pause behaviours, and custom playback rates.
 
 ---
 
@@ -129,12 +142,12 @@
   - Task 5.1: Completed.
   - Task 5.2: Completed.
   - Task 5.3: Completed.
-  - Task 5.4: Up next.
+  - Task 5.4: Completed.
+  - Task 5.5: Up next (Buffering Detection & Recovery).
 
 ---
 
 ## 5. Pending Features
-- Task 5.4: Adaptive drift correction engine ($\pm 5\%$ rate nudge for drift $0.25$s–$1.5$s, hard seek for drift $\ge 1.5$s).
 - Task 5.5: Buffering detection and recovery.
 - Task 5.6: Resync button and Sync Health UI.
 - Phase 6: Room queue, intermission screen, auto-next flow.
@@ -154,7 +167,7 @@
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
-- `backend/tests/test_sync.py` (13 tests) — **PASSED**
+- `backend/tests/test_sync.py` (15 tests) — **PASSED**
   - `test_playback_manager_initial_state`: Initial state defaults.
   - `test_playback_manager_play_action`: PLAY action updates is_playing and sequence.
   - `test_playback_manager_pause_action`: PAUSE action updates is_playing and records position.
@@ -168,19 +181,20 @@
   - `test_socket_playback_action_play_pause_seek_rate_lifecycle`: Full socket event lifecycle verifying `playback_sync` broadcast with `originating_socket_id` and monotonic sequence numbers.
   - `test_two_participants_playback_sync_and_echo_suppression`: Two-client watch party simulation verifying echo suppression via `originating_socket_id` and non-originating client application.
   - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2116 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 33 backend tests + Vite build)
+  - `test_get_playback_state_socket_handler`: Direct authoritative playback state querying via Socket.IO.
+  - `test_authoritative_drift_formula_consistency`: Validates server authoritative time matches client drift thresholds.
+- `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2117 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 35 backend tests + 20 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 5 Task 5.4: Implement Adaptive Drift Correction Engine**:
-  1. Add periodic sync tick (or drift checker) in `useVideoSync` computing local drift:
-     $$\text{drift} = |\text{player.currentTime} - \text{authoritative\_time}|$$
-  2. Implement tiered correction:
-     - $\text{drift} < 0.25$s: Do nothing (within tolerance).
-     - $0.25\text{s} \le \text{drift} < 1.5$s: Subtly adjust `playbackRate` by $\pm 5\%$ until aligned.
-     - $\text{drift} \ge 1.5$s: Hard seek directly to authoritative timestamp.
+- **Phase 5 Task 5.5: Implement Buffering Detection & Recovery**:
+  1. Detect video element `waiting` / `canplay` / `stalled` events in `VideoPlayer.tsx`.
+  2. Implement `buffering_start` and `buffering_end` Socket.IO events to notify room participants.
+  3. Pause authoritative playback when a participant buffers (or show buffering indicator overlay) to keep both clients synchronized.
+  4. Automatically resume playback once all buffering participants have loaded enough frames.
 
 ---
 
@@ -193,3 +207,4 @@
 - **Direct Local Playback with URL.createObjectURL**: Video streams 100% locally from disk without passing video bytes through the server or tunnel proxy.
 - **Server-Authoritative Playback State Machine with Originating Socket ID**: `RoomPlaybackState` manages the single source of truth for time, speed, and play/pause state; broadcasting `originating_socket_id` eliminates feedback loops.
 - **Quadruple-Layered Loop Prevention**: `originating_socket_id` matching + monotonic sequence numbering + `isApplyingRemoteRef` hook guard + `isRemoteActionRef` player handle lock prevents any feedback loops during remote sync.
+- **Tiered Adaptive Playback Drift Correction**: Micro-drift ($0.25$s to $1.5$s) uses imperceptible $\pm 5\%$ speed nudges, completely avoiding jarring audio stutters or seeks; macro-drift ($\ge 1.5$s) immediately seeks. Intended speed is faithfully restored upon re-alignment.

@@ -130,6 +130,8 @@ export const RoomPage: React.FC = () => {
     handlePlaybackRateChange,
     currentSequence,
     lastAction,
+    driftSeconds,
+    isNudging,
   } = useVideoSync({
     socket,
     playerRef: videoPlayerRef,
@@ -397,6 +399,13 @@ export const RoomPage: React.FC = () => {
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-void-800 text-cyan-300 border border-void-600 flex items-center gap-1.5 shadow-sm">
                       <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                       <span>Sync #{currentSequence} {lastAction ? `(${lastAction})` : ''}</span>
+                    </span>
+                  )}
+                  {/* Adaptive Drift Correction Status Indicator */}
+                  {isNudging && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 flex items-center gap-1.5 shadow-sm animate-pulse">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      <span>Syncing drift ({Math.round(driftSeconds * 1000)}ms)</span>
                     </span>
                   )}
                   {/* Countdown preview in bar when active */}

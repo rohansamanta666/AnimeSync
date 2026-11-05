@@ -51,10 +51,10 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 - [x] Task 5.1: Build custom HTML5 video player component loading local `File` via `URL.createObjectURL()`.
 - [x] Task 5.2: Implement server playback state machine (`is_playing`, `current_time`, `speed`, `updated_at`, `sequence`).
 - [x] Task 5.3: Implement client-to-server controls: Play, Pause, Seek, Speed with sequence numbers to eliminate feedback loops.
-- [ ] Task 5.4: Implement adaptive drift correction engine:
-  - Drift < 0.25s: Ignore.
-  - 0.25s – 1.5s: Gentle `playbackRate` nudge ($\pm 5\%$).
-  - Drift $\ge$ 1.5s: Immediate hard seek.
+- [x] Task 5.4: Implement adaptive drift correction engine:
+  - Drift < 0.25s: Ignore (or restore intended speed if previously nudged).
+  - 0.25s – 1.5s: Gentle `playbackRate` nudge (±5%).
+  - Drift >= 1.5s: Immediate hard seek.
 - [ ] Task 5.5: Implement buffering detection: notify server when either client buffers, with optional "pause both on buffer" setting.
 - [ ] Task 5.6: Implement manual "Resync" button and Sync Health status indicator (latency, drift ms, sync status).
 - [ ] Task 5.7: Test playback sync under simulated latency and packet drops.
