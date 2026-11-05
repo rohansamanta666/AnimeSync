@@ -75,6 +75,25 @@ export interface PlaybackState {
   sequence_number: number;
 }
 
+export type PlaybackActionType = 'PLAY' | 'PAUSE' | 'SEEK' | 'RATE_CHANGE';
+
+export interface PlaybackSyncPayload {
+  room_code: string;
+  action: PlaybackActionType;
+  timestamp: number;
+  current_time: number;
+  is_playing: boolean;
+  playback_rate: number;
+  playback_speed: number;
+  server_sequence: number;
+  sequence_number: number;
+  server_time: number;
+  updated_at: number;
+  originating_socket_id: string;
+  origin_sid?: string;
+  triggered_by?: string;
+}
+
 export interface ChatMessage {
   id: string;
   room_id: string;

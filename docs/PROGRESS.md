@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 5 (Synchronized Video Player) — **IN PROGRESS (Tasks 5.1 & 5.2 Completed)**
-- **Next Task**: Phase 5 Task 5.3 (Client-to-Server Playback Controls & Sequence Number Loop Prevention)
+- **Current Phase**: Phase 5 (Synchronized Video Player) — **IN PROGRESS (Tasks 5.1, 5.2, 5.3 Completed)**
+- **Next Task**: Phase 5 Task 5.4 (Adaptive Drift Correction Engine)
 - **Overall Health**: Healthy
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -17,7 +17,7 @@
 | **Phase 2** | Private Rooms & Realtime Presence | **COMPLETED** | 100% |
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
-| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 40% |
+| **Phase 5** | Synchronized Video Player | **IN PROGRESS** | 60% |
 | **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
@@ -114,6 +114,13 @@
   - Room isolation and authentication validation: checks active session, verifies room code match, and rejects cross-room control attempts.
   - Readiness gate: rejects playback commands from participants who have not verified their local file (`WAITING_FOR_FILE`, `VERIFYING`, `VERIFICATION_FAILED`).
   - Authoritative broadcast: emits `playback_sync` with updated state, monotonic `server_sequence`, and `originating_socket_id` so senders can ignore self-echoes.
+- [x] **Task 5.3: Client-to-Server Controls & Sequence Number Loop Prevention (`useVideoSync.ts`)**:
+  - Binds `VideoPlayer` controls (Play, Pause, Seek, Speed) directly to backend `playback_action` emissions.
+  - Self-echo suppression: checks incoming `playback_sync.originating_socket_id === socket.id` and ignores own actions to eliminate feedback loops.
+  - Sequence number ordering: ignores stale or duplicate updates (`incomingSeq <= lastAppliedSeq`).
+  - Programmatic event suppression (`isApplyingRemoteRef` & `isRemoteActionRef`): prevents remote handle calls (`play()`, `pause()`, `seek()`) from re-triggering outgoing socket events.
+  - Real-time sync feedback badge (`Sync #Seq (ACTION)`) displayed in the room lobby bar.
+  - Fully verified across multi-client simulated watch parties.
 
 ---
 
@@ -121,13 +128,13 @@
 - **Phase 5: Synchronized Video Player**:
   - Task 5.1: Completed.
   - Task 5.2: Completed.
-  - Task 5.3: Up next.
+  - Task 5.3: Completed.
+  - Task 5.4: Up next.
 
 ---
 
 ## 5. Pending Features
-- Task 5.3: Client-to-server controls (play, pause, seek, speed) with monotonic sequence numbers and self-echo suppression.
-- Task 5.4: Adaptive drift correction ($\pm 5\%$ nudges, hard seek for drift $\ge 1.5$s).
+- Task 5.4: Adaptive drift correction engine ($\pm 5\%$ rate nudge for drift $0.25$s–$1.5$s, hard seek for drift $\ge 1.5$s).
 - Task 5.5: Buffering detection and recovery.
 - Task 5.6: Resync button and Sync Health UI.
 - Phase 6: Room queue, intermission screen, auto-next flow.
@@ -147,7 +154,7 @@
 - `backend/tests/test_presence.py` (6 tests) — **PASSED**
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
-- `backend/tests/test_sync.py` (11 tests) — **PASSED**
+- `backend/tests/test_sync.py` (13 tests) — **PASSED**
   - `test_playback_manager_initial_state`: Initial state defaults.
   - `test_playback_manager_play_action`: PLAY action updates is_playing and sequence.
   - `test_playback_manager_pause_action`: PAUSE action updates is_playing and records position.
@@ -159,16 +166,21 @@
   - `test_socket_playback_action_room_isolation_mismatch`: Rejection of commands with mismatched room_code (room isolation).
   - `test_socket_playback_action_readiness_gate_rejection`: Readiness gate enforcement (rejecting unverified participants).
   - `test_socket_playback_action_play_pause_seek_rate_lifecycle`: Full socket event lifecycle verifying `playback_sync` broadcast with `originating_socket_id` and monotonic sequence numbers.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2115 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 31 backend tests + Vite build)
+  - `test_two_participants_playback_sync_and_echo_suppression`: Two-client watch party simulation verifying echo suppression via `originating_socket_id` and non-originating client application.
+  - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2116 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 33 backend tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 5 Task 5.3: Implement Client-to-Server Controls & Echo Suppression**:
-  1. Build a custom `useVideoSync` frontend hook that connects `VideoPlayer` events to the Socket.IO `playback_action` handler.
-  2. Implement client sequence number tracking: when receiving `playback_sync`, if `originating_socket_id === socket.id`, ignore the event to avoid self-echo play/pause loops.
-  3. Wire play, pause, seek, and rate change triggers from `VideoPlayer` through `useVideoSync`.
+- **Phase 5 Task 5.4: Implement Adaptive Drift Correction Engine**:
+  1. Add periodic sync tick (or drift checker) in `useVideoSync` computing local drift:
+     $$\text{drift} = |\text{player.currentTime} - \text{authoritative\_time}|$$
+  2. Implement tiered correction:
+     - $\text{drift} < 0.25$s: Do nothing (within tolerance).
+     - $0.25\text{s} \le \text{drift} < 1.5$s: Subtly adjust `playbackRate` by $\pm 5\%$ until aligned.
+     - $\text{drift} \ge 1.5$s: Hard seek directly to authoritative timestamp.
 
 ---
 
@@ -180,3 +192,4 @@
 - **Online-Only Readiness Calculation**: Offline or departed participants do not permanently block active viewers.
 - **Direct Local Playback with URL.createObjectURL**: Video streams 100% locally from disk without passing video bytes through the server or tunnel proxy.
 - **Server-Authoritative Playback State Machine with Originating Socket ID**: `RoomPlaybackState` manages the single source of truth for time, speed, and play/pause state; broadcasting `originating_socket_id` eliminates feedback loops.
+- **Quadruple-Layered Loop Prevention**: `originating_socket_id` matching + monotonic sequence numbering + `isApplyingRemoteRef` hook guard + `isRemoteActionRef` player handle lock prevents any feedback loops during remote sync.

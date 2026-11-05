@@ -19,6 +19,7 @@ import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
 import { useSocket } from '../hooks/useSocket';
 import { useReadyState } from '../hooks/useReadyState';
+import { useVideoSync } from '../hooks/useVideoSync';
 import { Button } from '../components/common/Button';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
@@ -114,6 +115,27 @@ export const RoomPage: React.FC = () => {
     playbackEpisodeId,
     acknowledgePlayback,
   } = useReadyState(socket, earlyCurrentParticipant?.status);
+
+  // Phase 5 Task 5.3: Client-to-Server Playback Controls & Sequence Loop Prevention
+  const isSyncAllowed =
+    !!auth &&
+    (earlyCurrentParticipant?.status === 'READY' ||
+      earlyCurrentParticipant?.status === 'WATCHING' ||
+      earlyCurrentParticipant?.status === 'VERIFIED');
+
+  const {
+    handlePlay,
+    handlePause,
+    handleSeek,
+    handlePlaybackRateChange,
+    currentSequence,
+    lastAction,
+  } = useVideoSync({
+    socket,
+    playerRef: videoPlayerRef,
+    roomCode: room?.code,
+    isEnabled: isSyncAllowed,
+  });
 
   // Listen for socket events: episode added and verification result
   useEffect(() => {
@@ -311,7 +333,7 @@ export const RoomPage: React.FC = () => {
         {/* Watch Stage & Verification Area (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
           <Card variant="elevated" className="p-0 overflow-hidden border-void-600/80">
-            {/* Phase 5 Task 5.1: HTML5 Local Video Player Component */}
+            {/* Phase 5: HTML5 Local Video Player Stage with Real-Time Sync */}
             {currentEpisode ? (
               <VideoPlayer
                 ref={videoPlayerRef}
@@ -319,6 +341,10 @@ export const RoomPage: React.FC = () => {
                 animeTitle={currentEpisode.anime_title}
                 episodeNumber={currentEpisode.episode_number}
                 onFileSelect={(file) => setLocalVideoFile(file)}
+                onPlay={handlePlay}
+                onPause={handlePause}
+                onSeek={handleSeek}
+                onPlaybackRateChange={handlePlaybackRateChange}
               />
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
@@ -366,6 +392,13 @@ export const RoomPage: React.FC = () => {
                     <span className="text-xs font-mono text-ink-muted">Your Status:</span>
                     <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
                   </div>
+                  {/* Realtime Sync Status Indicator */}
+                  {currentSequence > 0 && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-void-800 text-cyan-300 border border-void-600 flex items-center gap-1.5 shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span>Sync #{currentSequence} {lastAction ? `(${lastAction})` : ''}</span>
+                    </span>
+                  )}
                   {/* Countdown preview in bar when active */}
                   {countdown.active && (
                     <span className="text-xs font-mono text-violet-300 animate-pulse">

@@ -187,3 +187,4 @@ class PlaybackManager:
 
 # Authoritative playback manager singleton
 playback_manager = PlaybackManager()
+

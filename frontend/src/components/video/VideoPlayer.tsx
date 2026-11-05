@@ -111,6 +111,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const fileInputRef = useRef<HTMLInputElement | null>(null);
     const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Remote update flag preventing programmatic updates from triggering user event callbacks
+    const isRemoteActionRef = useRef<boolean>(false);
 
     // Player state
     const [videoSrc, setVideoSrc] = useState<string | null>(null);
@@ -194,23 +196,47 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       () => ({
         play: async () => {
           if (videoRef.current) {
-            await videoRef.current.play();
+            isRemoteActionRef.current = true;
+            try {
+              await videoRef.current.play();
+            } finally {
+              setTimeout(() => {
+                isRemoteActionRef.current = false;
+              }, 120);
+            }
           }
         },
         pause: () => {
           if (videoRef.current) {
-            videoRef.current.pause();
+            isRemoteActionRef.current = true;
+            try {
+              videoRef.current.pause();
+            } finally {
+              setTimeout(() => {
+                isRemoteActionRef.current = false;
+              }, 120);
+            }
           }
         },
         seek: (seconds: number) => {
           if (videoRef.current) {
-            videoRef.current.currentTime = Math.max(0, Math.min(seconds, duration || seconds));
+            isRemoteActionRef.current = true;
+            const targetTime = Math.max(0, Math.min(seconds, duration || seconds));
+            videoRef.current.currentTime = targetTime;
+            setCurrentTime(targetTime);
+            setTimeout(() => {
+              isRemoteActionRef.current = false;
+            }, 120);
           }
         },
         setPlaybackRate: (rate: number) => {
           if (videoRef.current) {
+            isRemoteActionRef.current = true;
             videoRef.current.playbackRate = rate;
             setPlaybackRateState(rate);
+            setTimeout(() => {
+              isRemoteActionRef.current = false;
+            }, 120);
           }
         },
         getCurrentTime: () => videoRef.current?.currentTime || 0,
@@ -248,7 +274,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       const targetTime = Math.max(0, Math.min(newTime, duration));
       video.currentTime = targetTime;
       setCurrentTime(targetTime);
-      onSeek?.(targetTime);
+      if (!isRemoteActionRef.current) {
+        onSeek?.(targetTime);
+      }
     };
 
     const handleVolumeChange = (newVol: number) => {
@@ -277,7 +305,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       video.playbackRate = rate;
       setPlaybackRateState(rate);
       setShowSpeedMenu(false);
-      onPlaybackRateChange?.(rate);
+      if (!isRemoteActionRef.current) {
+        onPlaybackRateChange?.(rate);
+      }
     };
 
     const toggleFullscreen = async () => {
@@ -448,11 +478,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onPlay={() => {
             setIsPlaying(true);
             setIsBuffering(false);
-            onPlay?.();
+            if (!isRemoteActionRef.current) {
+              onPlay?.();
+            }
           }}
           onPause={() => {
             setIsPlaying(false);
-            onPause?.();
+            if (!isRemoteActionRef.current) {
+              onPause?.();
+            }
           }}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}

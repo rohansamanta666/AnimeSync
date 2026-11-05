@@ -50,7 +50,7 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ## Phase 5 — Synchronized Video Player
 - [x] Task 5.1: Build custom HTML5 video player component loading local `File` via `URL.createObjectURL()`.
 - [x] Task 5.2: Implement server playback state machine (`is_playing`, `current_time`, `speed`, `updated_at`, `sequence`).
-- [ ] Task 5.3: Implement client-to-server controls: Play, Pause, Seek, Speed with sequence numbers to eliminate feedback loops.
+- [x] Task 5.3: Implement client-to-server controls: Play, Pause, Seek, Speed with sequence numbers to eliminate feedback loops.
 - [ ] Task 5.4: Implement adaptive drift correction engine:
   - Drift < 0.25s: Ignore.
   - 0.25s – 1.5s: Gentle `playbackRate` nudge ($\pm 5\%$).

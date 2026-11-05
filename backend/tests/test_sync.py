@@ -308,3 +308,120 @@ async def test_socket_playback_action_play_pause_seek_rate_lifecycle():
         assert res_state["state"]["playback_speed"] == 1.25
 
     await connection_manager.unregister_connection(sid)
+
+
+# ---------------------------------------------------------------------------
+# 3. Two-Participant Watch Party Coordination Tests (Task 5.3)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_two_participants_playback_sync_and_echo_suppression():
+    """
+    Simulates two participants (Host and Friend) watching in the same room:
+    1. Host emits PLAY -> Server broadcasts to room with origin_sid = sid_host.
+       - Host ignores own broadcast (loop prevention).
+       - Friend applies remote PLAY.
+    2. Friend emits PAUSE -> Server broadcasts with origin_sid = sid_friend.
+       - Friend ignores own broadcast.
+       - Host applies remote PAUSE.
+    3. Monotonic sequence increments on each action.
+    """
+    room = await _make_room("Duo Party")
+    host = await _make_participant(room.id, "HostUser", ParticipantStatus.WATCHING)
+    friend = await _make_participant(room.id, "FriendUser", ParticipantStatus.WATCHING)
+
+    sid_host = "sid_host_tab1"
+    sid_friend = "sid_friend_tab2"
+
+    await connection_manager.register_connection(
+        sid=sid_host, room_code=room.code, room_id=room.id,
+        participant_id=host.id, username="HostUser", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid_friend, room_code=room.code, room_id=room.id,
+        participant_id=friend.id, username="FriendUser", is_host=False
+    )
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit:
+        # Step 1: Host presses Play
+        res_play = await playback_action(sid_host, {
+            "action": "PLAY",
+            "timestamp": 0.0,
+            "room_code": room.code
+        })
+        assert res_play["status"] == "OK"
+        assert res_play["sequence_number"] == 1
+
+        # Check broadcast payload sent to room
+        calls = [c for c in mock_emit.call_args_list if c[0][0] == "playback_sync"]
+        assert len(calls) == 1
+        sync_1 = calls[0][0][1]
+        assert sync_1["room_code"] == room.code
+        assert sync_1["action"] == "PLAY"
+        assert sync_1["originating_socket_id"] == sid_host
+        assert sync_1["server_sequence"] == 1
+
+        # Verify client-side loop prevention rules:
+        # Host: origin matches own sid -> SUPPRESS (no feedback loop)
+        assert sync_1["originating_socket_id"] == sid_host
+        # Friend: origin does NOT match friend's sid -> APPLY
+        assert sync_1["originating_socket_id"] != sid_friend
+
+        # Step 2: Friend presses Pause at 23.5s
+        res_pause = await playback_action(sid_friend, {
+            "action": "PAUSE",
+            "timestamp": 23.5,
+            "room_code": room.code
+        })
+        assert res_pause["status"] == "OK"
+        assert res_pause["sequence_number"] == 2
+
+        calls = [c for c in mock_emit.call_args_list if c[0][0] == "playback_sync"]
+        assert len(calls) == 2
+        sync_2 = calls[1][0][1]
+        assert sync_2["action"] == "PAUSE"
+        assert sync_2["timestamp"] == 23.5
+        assert sync_2["originating_socket_id"] == sid_friend
+        assert sync_2["server_sequence"] == 2
+
+        # Friend ignores own pause; Host applies friend's pause
+        assert sync_2["originating_socket_id"] == sid_friend
+        assert sync_2["originating_socket_id"] != sid_host
+
+    await connection_manager.unregister_connection(sid_host)
+    await connection_manager.unregister_connection(sid_friend)
+
+
+@pytest.mark.asyncio
+async def test_cross_room_playback_isolation():
+    """Playback action in Room 1 must only emit to Room 1 channel, never to Room 2."""
+    room_1 = await _make_room("Room One")
+    room_2 = await _make_room("Room Two")
+    p1 = await _make_participant(room_1.id, "User1", ParticipantStatus.WATCHING)
+    p2 = await _make_participant(room_2.id, "User2", ParticipantStatus.WATCHING)
+
+    sid_1 = "sid_r1"
+    sid_2 = "sid_r2"
+    await connection_manager.register_connection(
+        sid=sid_1, room_code=room_1.code, room_id=room_1.id,
+        participant_id=p1.id, username="User1", is_host=True
+    )
+    await connection_manager.register_connection(
+        sid=sid_2, room_code=room_2.code, room_id=room_2.id,
+        participant_id=p2.id, username="User2", is_host=True
+    )
+
+    with patch.object(sio, "emit", new_callable=AsyncMock) as mock_emit:
+        res = await playback_action(sid_1, {"action": "PLAY", "timestamp": 0.0})
+        assert res["status"] == "OK"
+
+        calls = [c for c in mock_emit.call_args_list if c[0][0] == "playback_sync"]
+        assert len(calls) == 1
+        # Target room must be room_1.code strictly
+        assert calls[0][1]["room"] == room_1.code
+        assert calls[0][1]["room"] != room_2.code
+
+    await connection_manager.unregister_connection(sid_1)
+    await connection_manager.unregister_connection(sid_2)
+
+
