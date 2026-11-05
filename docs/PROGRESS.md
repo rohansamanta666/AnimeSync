@@ -2,8 +2,10 @@
 
 ## 1. Project Status Overview
 - **Current Phase**: Phase 5 (Synchronized Video Player) — **COMPLETED (Tasks 5.1–5.6 Completed & Verified)**
-- **Next Task**: Phase 6 — Episode Queue & Auto-Next Workflow
-- **Overall Health**: Healthy
+- **Next Task**: **Phase 6 — Task 6.1: Episode Queue Data Model and API/Socket Events**
+- **Git Branch**: `main`
+- **Latest Commit**: `63a563d` (`feat(phase-5): implement manual resync and sync health diagnostics UI (task 5.6)`)
+- **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
 
@@ -174,7 +176,11 @@
 ---
 
 ## 6. Known Bugs & Issues
-- None.
+- **Known Bugs**: None.
+- **System Limitations & Edge Cases Handled**:
+  - **Browser Background Tab Throttling**: Modern browsers throttle `setInterval` timers (e.g. 2s drift check interval) in background/minimized tabs. When refocusing the tab, drift correction catches up on the subsequent tick, or the user can press `Shift+R` to manually trigger an immediate resync.
+  - **Client System Clock Skew**: Latency telemetry relies on client timestamps (`Date.now()`); to guard against negative latency from sudden OS clock shifts, calculations are clamped to 0ms.
+  - **Browser Codec Compatibility**: Playback uses native HTML5 `<video>`; video files encoded with unsupported codecs trigger the player's custom codec alert prompting the user to load a standard H.264/AAC MP4 or WebM file.
 
 ---
 
