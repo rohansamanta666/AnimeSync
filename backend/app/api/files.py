@@ -14,6 +14,7 @@ from backend.app.models.participant import Participant
 from backend.app.models.episode import Episode
 from backend.app.services.room_manager import RoomManager
 from backend.app.services.storage import StorageService, sanitize_filename
+from backend.app.services.queue_manager import QueueManager
 from backend.app.schemas.episode import (
     UploadInitRequest,
     UploadInitResponse,
@@ -145,22 +146,25 @@ async def complete_upload(
         room_res = await db.execute(select(Room).where(Room.id == episode.room_id))
         room = room_res.scalar_one_or_none()
         if room:
-            episode_dict = {
-                "id": episode.id,
-                "anime_title": episode.anime_title,
-                "season": episode.season,
-                "episode_number": episode.episode_number,
-                "display_title": episode.display_title,
-                "filename": episode.filename,
-                "file_size_bytes": episode.file_size_bytes,
-                "sha256_hash": episode.sha256_hash,
-                "duration_seconds": episode.duration_seconds,
-                "upload_status": episode.upload_status.value,
-                "queue_position": episode.queue_position
-            }
+            episode_dict = QueueManager.serialize_episode(episode)
             await sio.emit("episode_added", {"episode": episode_dict}, room=room.code)
-            # Phase 4: Reset all participant readiness when a new episode is uploaded
-            await invalidate_room_readiness(room.code, reason="New episode uploaded by host")
+
+            # Broadcast updated episode queue
+            all_eps = await QueueManager.get_queue(db, room.id)
+            queue_list = [QueueManager.serialize_episode(ep) for ep in all_eps]
+            await sio.emit(
+                "queue_updated",
+                {
+                    "room_code": room.code,
+                    "episodes": queue_list,
+                    "current_episode_id": room.current_episode_id,
+                },
+                room=room.code,
+            )
+
+            # Only reset readiness if this newly uploaded episode is the room's current active episode
+            if room.current_episode_id == episode.id:
+                await invalidate_room_readiness(room.code, reason="New episode uploaded by host")
 
         return EpisodeResponse.model_validate(episode)
     except Exception as e:

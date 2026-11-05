@@ -55,12 +55,16 @@ class RoomPlaybackState:
 
 
 class PlaybackManager:
-    """In-memory manager tracking playback state and buffering coordination for all active rooms."""
+    """In-memory manager tracking playback state, buffering coordination, and video end / intermission for all active rooms."""
 
     def __init__(self):
         self._states: Dict[str, RoomPlaybackState] = {}
         # room_code -> {participant_id: username}
         self._buffering_participants: Dict[str, Dict[str, str]] = {}
+        # room_code -> (episode_id, ended_timestamp)
+        self._ended_episodes: Dict[str, Tuple[str, float]] = {}
+        # room_code -> intermission metadata dict
+        self._intermissions: Dict[str, dict] = {}
 
     def get_state(self, room_code: str) -> Optional[RoomPlaybackState]:
         return self._states.get(room_code.upper())
@@ -92,12 +96,72 @@ class PlaybackManager:
         )
         self._states[code] = state
         self.clear_room_buffering(code)
+        self.clear_intermission(code)
+        self.clear_ended(code)
         return state
 
     def clear(self) -> None:
-        """Clear all room playback states and buffering info (used for test isolation)."""
+        """Clear all room playback states, buffering info, and intermission info (used for test isolation)."""
         self._states.clear()
         self._buffering_participants.clear()
+        self._ended_episodes.clear()
+        self._intermissions.clear()
+
+    # ---------------------------------------------------------------------------
+    # Video Ended Coordination & Duplicate Protection (Phase 6 Task 6.3)
+    # ---------------------------------------------------------------------------
+
+    def record_episode_ended(
+        self, room_code: str, episode_id: str, cooldown_seconds: float = 15.0
+    ) -> Tuple[bool, RoomPlaybackState]:
+        """
+        Records that an episode has ended for the room.
+        Guarantees duplicate protection: if multiple participants emit 'playback_ended'
+        near the same time, only the first call triggers the transition.
+        Returns: (is_first_ended_call, state).
+        """
+        code = room_code.upper()
+        now = time.time()
+        last_ended = self._ended_episodes.get(code)
+
+        if last_ended:
+            last_ep_id, last_time = last_ended
+            if last_ep_id == episode_id and (now - last_time) < cooldown_seconds:
+                # Duplicate / already recorded
+                return False, self.get_or_create_state(code)
+
+        # First call for this episode end
+        self._ended_episodes[code] = (episode_id, now)
+
+        state = self.get_or_create_state(code)
+        # Authoritatively pause playback
+        if state.is_playing:
+            state.current_time = state.compute_current_time(now)
+            state.is_playing = False
+            state.updated_at = now
+            state.sequence_number += 1
+
+        return True, state
+
+    def clear_ended(self, room_code: str) -> None:
+        """Clears the recorded ended episode for a room."""
+        self._ended_episodes.pop(room_code.upper(), None)
+
+    # ---------------------------------------------------------------------------
+    # Intermission State Management (Phase 6 Task 6.4)
+    # ---------------------------------------------------------------------------
+
+    def set_intermission(self, room_code: str, data: dict) -> None:
+        """Stores intermission metadata for an active room countdown."""
+        self._intermissions[room_code.upper()] = data
+
+    def get_intermission(self, room_code: str) -> Optional[dict]:
+        """Retrieves active intermission metadata for a room."""
+        return self._intermissions.get(room_code.upper())
+
+    def clear_intermission(self, room_code: str) -> None:
+        """Clears active intermission metadata."""
+        self._intermissions.pop(room_code.upper(), None)
 
     # ---------------------------------------------------------------------------
     # Buffering Tracking & Shared Pause / Resume Coordination

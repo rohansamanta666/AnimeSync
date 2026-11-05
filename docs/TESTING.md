@@ -73,6 +73,17 @@ Located in `backend/tests/`:
   - `test_manual_resync_alignment_playing` (Task 5.6): Authoritative playback state alignment when playing, calculating elapsed server time.
   - `test_manual_resync_alignment_paused` (Task 5.6): Authoritative playback state alignment when paused, retaining static position.
   - `test_manual_resync_alignment_buffering_preservation` (Task 5.6): Authoritative state retrieval preserving `paused_for_buffering` status during manual resync.
+- **`test_queue.py`** (Phase 6 Tasks 6.1 – 6.5):
+  - `test_queue_manager_get_and_order`: Verifies queue retrieval and contiguous position sorting.
+  - `test_queue_manager_reorder`: Verifies reordering queue items by ID list and compacting position indices.
+  - `test_queue_manager_remove_and_compact`: Verifies episode removal from database and disk, re-compacting remaining indices, and advancing `current_episode_id` if the active episode was removed.
+  - `test_queue_manager_get_next_episode`: Validates querying the next subsequent episode in queue position order and detecting end-of-queue.
+  - `test_rest_queue_endpoints_lifecycle`: Comprehensive API test of `GET /queue`, `PUT /queue/reorder`, `POST /queue/select`, `DELETE /queue/{id}`, and 403 Forbidden verification for non-hosts.
+  - `test_socket_playback_ended_duplicate_protection`: Verifies that concurrent `playback_ended` emissions from multiple room participants are deduplicated via server cooldown.
+  - `test_socket_playback_ended_last_episode`: Verifies `queue_finished` emission when the final queued episode finishes.
+  - `test_socket_intermission_cancel_and_skip`: Validates intermission countdown lifecycle, host cancellation, and manual fast-forward skip.
+  - `test_auto_next_readiness_reset_enforcement`: Verifies that advancing to the next episode strictly resets all room participants (including `WATCHING`) back to `WAITING_FOR_FILE` and clears verified hashes so readiness gates are enforced.
+  - `test_socket_queue_crud_events`: End-to-end Socket.IO events for `get_queue`, `reorder_queue`, `select_episode`, and `remove_from_queue`.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -90,6 +101,11 @@ Located in `frontend/tests/`:
   - `determineSyncStatus`: validates statuses across room buffering, local buffering, active nudging, paused playback, and nominal synchronized playback.
   - `computePingLatency`: validates round-trip ping time calculation and negative clock-skew clamping.
   - `calculateResyncTarget`: verifies target timestamp calculation with elapsed time at 1.0x, custom rates (1.5x), and static timestamp preservation while paused.
+- **`queue.test.ts`** (11 unit tests, Tasks 6.1 – 6.5):
+  - `reorderEpisodeList`: verifies reordering according to explicit ID lists and appending unmentioned episodes.
+  - `findNextEpisode`: verifies next episode lookups, boundary handling for last episode, null current episode fallback, and empty queue safety.
+  - `computeIntermissionSecondsRemaining`: verifies ceiling calculation and non-negative clamping for past targets.
+  - `isDuplicateEndedEvent`: verifies client-side duplicate detection during cooldown, expiration after cooldown, and distinct episode handling.
 
 ---
 

@@ -105,6 +105,27 @@ export interface BufferingUpdatePayload {
   triggered_by?: string;
 }
 
+export interface QueueResponse {
+  room_code: string;
+  current_episode_id: string | null;
+  episodes: Episode[];
+}
+
+export interface IntermissionData {
+  room_code: string;
+  current_episode_id: string;
+  next_episode: Episode;
+  seconds_remaining: number;
+  target_advance_time: number;
+}
+
+export interface QueueAdvancedData {
+  room_code: string;
+  current_episode_id: string;
+  episode: Episode;
+  reason?: string;
+}
+
 export interface ChatMessage {
   id: string;
   room_id: string;

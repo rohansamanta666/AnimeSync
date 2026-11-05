@@ -10,15 +10,27 @@ from backend.app.database import AsyncSessionLocal
 from backend.app.models.room import Room
 from backend.app.models.participant import Participant, ParticipantStatus
 from backend.app.models.episode import Episode
+from backend.app.services.queue_manager import QueueManager
 from backend.app.sockets.connection_manager import connection_manager
 from backend.app.sockets.playback_manager import playback_manager, RoomPlaybackState
 
 # ---------------------------------------------------------------------------
-# Phase 4: Per-room countdown state tracking
-# Maps room_code -> asyncio.Task (the pending countdown task)
-# If the dict has an entry, a countdown is in progress for that room.
+# Phase 4 & Phase 6: Per-room countdown and intermission task tracking
 # ---------------------------------------------------------------------------
 _countdown_tasks: dict[str, asyncio.Task] = {}
+_intermission_tasks: dict[str, asyncio.Task] = {}
+INTERMISSION_SECONDS = 15.0
+
+
+def _cancel_intermission(room_code: str) -> bool:
+    """Cancels active intermission task for a room (idempotent)."""
+    code = room_code.upper()
+    playback_manager.clear_intermission(code)
+    task = _intermission_tasks.pop(code, None)
+    if task and not task.done():
+        task.cancel()
+        return True
+    return False
 
 # Create Async Socket.IO Server
 sio = socketio.AsyncServer(
@@ -703,13 +715,16 @@ async def set_unready(sid: str, data: dict = None):
     return {"status": "OK", "message": "Ready status cleared"}
 
 
-async def invalidate_room_readiness(room_code: str, reason: str = "Episode changed") -> None:
+async def invalidate_room_readiness(
+    room_code: str, reason: str = "Episode changed", reset_watching: bool = False
+) -> None:
     """
-    Called by the files API when host completes a new upload.
-    Resets all non-WATCHING participants back to WAITING_FOR_FILE and cancels countdown.
-    Exported so files.py can call it.
+    Called by the files API or queue management when episode changes or advances.
+    Resets participants back to WAITING_FOR_FILE and cancels any countdown or intermission.
+    By default, preserves active WATCHING participants unless reset_watching=True.
     """
     _cancel_countdown(room_code)
+    _cancel_intermission(room_code)
     playback_manager.reset_state(room_code)
 
     async with AsyncSessionLocal() as db:
@@ -730,7 +745,11 @@ async def invalidate_room_readiness(room_code: str, reason: str = "Episode chang
             ParticipantStatus.VERIFICATION_FAILED,
             ParticipantStatus.DOWNLOADED,
             ParticipantStatus.DOWNLOADING,
+            ParticipantStatus.BUFFERING,
         }
+        if reset_watching:
+            reset_statuses.add(ParticipantStatus.WATCHING)
+
         changed = False
         for p in room.participants:
             if p.status in reset_statuses:
@@ -1051,6 +1070,362 @@ async def ping_check(sid: str, data: dict = None):
         "client_time": client_time,
         "server_time": time.time(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: Episode Queue & Auto-Next Workflow (Tasks 6.1 – 6.5)
+# ---------------------------------------------------------------------------
+
+async def _advance_to_next_episode(room_code: str, next_episode_id: str) -> Optional[dict]:
+    """
+    Advances room to the next episode:
+    - Cancels any intermission task
+    - Updates room.current_episode_id in DB
+    - Invalidates readiness (participants must verify the new file)
+    - Resets playback state
+    - Emits queue_advanced and queue_updated events
+    """
+    _cancel_intermission(room_code)
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return None
+
+        success, next_ep = await QueueManager.set_current_episode(db, room.id, next_episode_id)
+        if not success or not next_ep:
+            return None
+
+        # Reset readiness for all participants (they must verify the new local file)
+        await invalidate_room_readiness(
+            room_code, reason="Queue auto-advanced to next episode", reset_watching=True
+        )
+        playback_manager.reset_state(room_code)
+
+        ep_dict = QueueManager.serialize_episode(next_ep)
+        all_eps = await QueueManager.get_queue(db, room.id)
+        queue_dicts = [QueueManager.serialize_episode(ep) for ep in all_eps]
+
+        await sio.emit(
+            "queue_advanced",
+            {
+                "room_code": room_code,
+                "current_episode_id": next_ep.id,
+                "episode": ep_dict,
+            },
+            room=room_code,
+        )
+
+        await sio.emit(
+            "queue_updated",
+            {
+                "room_code": room_code,
+                "episodes": queue_dicts,
+                "current_episode_id": next_ep.id,
+            },
+            room=room_code,
+        )
+
+        return ep_dict
+
+
+async def _run_intermission(room_code: str, next_episode_id: str) -> None:
+    """
+    Background task: waits INTERMISSION_SECONDS, then advances the room to the next episode.
+    Can be cancelled by host via cancel_intermission or skipped via skip_intermission.
+    """
+    try:
+        await asyncio.sleep(INTERMISSION_SECONDS)
+        await _advance_to_next_episode(room_code, next_episode_id)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _intermission_tasks.pop(room_code, None)
+
+
+@sio.event
+async def playback_ended(sid: str, data: dict = None):
+    """
+    Triggered when a participant's video element fires the 'ended' event.
+    Features:
+    - Authoritative duplicate protection: multiple clients reaching end within 15s cooldown
+      are deduplicated so intermission is started exactly once.
+    - Automatic transition to intermission if a next episode is queued.
+    - Emits queue_finished if no subsequent episodes exist.
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    payload = data or {}
+    episode_id = payload.get("episode_id")
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        target_ep_id = episode_id or room.current_episode_id
+        if not target_ep_id:
+            return {"status": "ERROR", "message": "No active episode found"}
+
+        is_first, state = playback_manager.record_episode_ended(
+            session.room_code, target_ep_id, cooldown_seconds=15.0
+        )
+        if not is_first:
+            return {"status": "ALREADY_HANDLED", "message": "Episode end already coordinated"}
+
+        # Authoritatively broadcast pause to all viewers
+        pause_sync = {
+            "room_code": session.room_code,
+            "action": "PAUSE",
+            "timestamp": state.current_time,
+            "current_time": state.current_time,
+            "is_playing": False,
+            "playback_rate": state.playback_speed,
+            "playback_speed": state.playback_speed,
+            "server_sequence": state.sequence_number,
+            "sequence_number": state.sequence_number,
+            "server_time": state.updated_at,
+            "updated_at": state.updated_at,
+            "originating_socket_id": "server",
+            "reason": "video_ended",
+            "triggered_by": session.username,
+        }
+        await sio.emit("playback_sync", pause_sync, room=session.room_code)
+
+        # Look up next episode in queue
+        next_ep = await QueueManager.get_next_episode(db, room.id, target_ep_id)
+        if next_ep:
+            intermission_data = {
+                "room_code": session.room_code,
+                "current_episode_id": target_ep_id,
+                "next_episode": QueueManager.serialize_episode(next_ep),
+                "seconds_remaining": int(INTERMISSION_SECONDS),
+                "target_advance_time": time.time() + INTERMISSION_SECONDS,
+            }
+            playback_manager.set_intermission(session.room_code, intermission_data)
+            _intermission_tasks[session.room_code] = asyncio.create_task(
+                _run_intermission(session.room_code, next_ep.id)
+            )
+
+            await sio.emit("intermission_started", intermission_data, room=session.room_code)
+            return {
+                "status": "OK",
+                "has_next": True,
+                "next_episode": QueueManager.serialize_episode(next_ep),
+            }
+        else:
+            await sio.emit(
+                "queue_finished",
+                {
+                    "room_code": session.room_code,
+                    "message": "All queued episodes completed.",
+                },
+                room=session.room_code,
+            )
+            return {"status": "OK", "has_next": False, "message": "Queue finished"}
+
+
+@sio.event
+async def video_ended(sid: str, data: dict = None):
+    """Alias for playback_ended."""
+    return await playback_ended(sid, data)
+
+
+@sio.event
+async def skip_intermission(sid: str, data: dict = None):
+    """Skips the intermission countdown and advances immediately to the next episode."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    code = session.room_code
+    intermission = playback_manager.get_intermission(code)
+
+    next_ep_id = None
+    if intermission and "next_episode" in intermission:
+        next_ep_id = intermission["next_episode"]["id"]
+    else:
+        async with AsyncSessionLocal() as db:
+            room_res = await db.execute(select(Room).where(Room.code == code))
+            room = room_res.scalar_one_or_none()
+            if room:
+                next_ep = await QueueManager.get_next_episode(db, room.id, room.current_episode_id)
+                if next_ep:
+                    next_ep_id = next_ep.id
+
+    if not next_ep_id:
+        return {"status": "ERROR", "message": "No next episode available in queue"}
+
+    advanced = await _advance_to_next_episode(code, next_ep_id)
+    return {"status": "OK", "episode": advanced}
+
+
+@sio.event
+async def cancel_intermission(sid: str, data: dict = None):
+    """Cancels the active intermission countdown so the room stays on the current episode."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    code = session.room_code
+    was_cancelled = _cancel_intermission(code)
+    await sio.emit(
+        "intermission_cancelled",
+        {
+            "room_code": code,
+            "cancelled_by": session.username,
+        },
+        room=code,
+    )
+    return {"status": "OK", "was_cancelled": was_cancelled}
+
+
+@sio.event
+async def get_queue(sid: str, data: dict = None):
+    """Retrieves the current ordered queue for the participant's room."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        episodes = await QueueManager.get_queue(db, room.id)
+        queue_dicts = [QueueManager.serialize_episode(ep) for ep in episodes]
+
+        return {
+            "status": "OK",
+            "room_code": room.code,
+            "current_episode_id": room.current_episode_id,
+            "episodes": queue_dicts,
+        }
+
+
+@sio.event
+async def reorder_queue(sid: str, data: dict = None):
+    """Reorders the room's queue using a list of episode IDs."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    ordered_ids = (data or {}).get("ordered_episode_ids", [])
+    if not isinstance(ordered_ids, list):
+        return {"status": "ERROR", "message": "ordered_episode_ids must be a list"}
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        reordered = await QueueManager.reorder_queue(db, room.id, ordered_ids)
+        queue_dicts = [QueueManager.serialize_episode(ep) for ep in reordered]
+
+        await sio.emit(
+            "queue_updated",
+            {
+                "room_code": room.code,
+                "episodes": queue_dicts,
+                "current_episode_id": room.current_episode_id,
+            },
+            room=room.code,
+        )
+
+        return {"status": "OK", "episodes": queue_dicts}
+
+
+@sio.event
+async def remove_from_queue(sid: str, data: dict = None):
+    """Removes an episode from the room's queue."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    episode_id = (data or {}).get("episode_id")
+    if not episode_id:
+        return {"status": "ERROR", "message": "episode_id is required"}
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        prev_current = room.current_episode_id
+        success, new_current, remaining = await QueueManager.remove_from_queue(
+            db, room.id, episode_id
+        )
+        if not success:
+            return {"status": "ERROR", "message": "Episode not found in queue"}
+
+        queue_dicts = [QueueManager.serialize_episode(ep) for ep in remaining]
+        await sio.emit(
+            "queue_updated",
+            {
+                "room_code": room.code,
+                "episodes": queue_dicts,
+                "current_episode_id": new_current,
+            },
+            room=room.code,
+        )
+
+        if prev_current == episode_id:
+            await invalidate_room_readiness(
+                room.code, reason="Active episode was removed from queue", reset_watching=True
+            )
+
+        return {
+            "status": "OK",
+            "episodes": queue_dicts,
+            "current_episode_id": new_current,
+        }
+
+
+@sio.event
+async def select_episode(sid: str, data: dict = None):
+    """Switches the room's active episode to a chosen episode in the queue."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    episode_id = (data or {}).get("episode_id")
+    if not episode_id:
+        return {"status": "ERROR", "message": "episode_id is required"}
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        success, episode = await QueueManager.set_current_episode(db, room.id, episode_id)
+        if not success or not episode:
+            return {"status": "ERROR", "message": "Episode not found in queue"}
+
+        await invalidate_room_readiness(
+            room.code, reason="Selected a different episode from queue", reset_watching=True
+        )
+
+        episodes = await QueueManager.get_queue(db, room.id)
+        queue_dicts = [QueueManager.serialize_episode(ep) for ep in episodes]
+
+        await sio.emit(
+            "queue_updated",
+            {
+                "room_code": room.code,
+                "episodes": queue_dicts,
+                "current_episode_id": episode.id,
+            },
+            room=room.code,
+        )
+
+        return {"status": "OK", "current_episode_id": episode.id}
 
 
 

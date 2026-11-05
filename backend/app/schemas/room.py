@@ -57,3 +57,14 @@ class RoomJoinResponse(BaseModel):
     participant_id: str
     session_token: str
     is_host: bool
+
+class QueueResponse(BaseModel):
+    room_code: str
+    current_episode_id: Optional[str] = None
+    episodes: List[EpisodeResponse] = []
+
+class QueueReorderRequest(BaseModel):
+    ordered_episode_ids: List[str]
+
+class QueueSelectRequest(BaseModel):
+    episode_id: str

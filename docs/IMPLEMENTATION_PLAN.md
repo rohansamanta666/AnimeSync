@@ -70,11 +70,11 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ---
 
 ## Phase 6 — Episode Queue & Auto-Next Workflow
-- [ ] Task 6.1: Implement Room Episode Queue data model and API/Socket events (`add_to_queue`, `remove_from_queue`, `reorder_queue`).
-- [ ] Task 6.2: Build episode queue UI showing upcoming episodes, download status, and verification badges.
-- [ ] Task 6.3: Implement video `ended` event coordination with duplicate protection.
-- [ ] Task 6.4: Build Intermission Screen showing next episode details, per-participant verification requirements, and countdown.
-- [ ] Task 6.5: Verify that Auto-Next enforces Ready-to-Watch requirements before advancing playback.
+- [x] Task 6.1: Implement Room Episode Queue data model and API/Socket events (`add_to_queue`, `remove_from_queue`, `reorder_queue`).
+- [x] Task 6.2: Build episode queue UI showing upcoming episodes, download status, and verification badges.
+- [x] Task 6.3: Implement video `ended` event coordination with duplicate protection.
+- [x] Task 6.4: Build Intermission Screen showing next episode details, per-participant verification requirements, and countdown.
+- [x] Task 6.5: Verify that Auto-Next enforces Ready-to-Watch requirements before advancing playback.
 
 ---
 

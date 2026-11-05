@@ -30,6 +30,9 @@ import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
 import { VideoPlayer, VideoPlayerHandle } from '../components/video/VideoPlayer';
 import { SyncHealthBadge } from '../components/video/SyncHealthBadge';
+import { useEpisodeQueue } from '../hooks/useEpisodeQueue';
+import { EpisodeQueue } from '../components/queue/EpisodeQueue';
+import { IntermissionOverlay } from '../components/queue/IntermissionOverlay';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -146,6 +149,29 @@ export const RoomPage: React.FC = () => {
     isEnabled: isSyncAllowed,
   });
 
+  // Phase 6: Episode Queue, Video Ended & Auto-Next Coordination Hook
+  const {
+    queue,
+    currentEpisodeId: queueCurrentEpisodeId,
+    intermission,
+    isQueueFinished,
+    handleVideoEnded,
+    handleReorderQueue,
+    handleRemoveEpisode,
+    handleSelectEpisode,
+    handleSkipIntermission,
+    handleCancelIntermission,
+    setIsQueueFinished,
+  } = useEpisodeQueue({
+    socket,
+    auth,
+    initialEpisodes: initialRoom?.episodes || [],
+    initialCurrentEpisodeId: initialRoom?.current_episode_id,
+    onEpisodeAdvanced: () => {
+      setLocalVideoFile(null);
+    },
+  });
+
   // Listen for socket events: episode added and verification result
   useEffect(() => {
     if (!socket) return;
@@ -244,8 +270,13 @@ export const RoomPage: React.FC = () => {
     ? activeParticipants.find((p) => p.id === auth.participant_id)
     : null;
 
-  // Active current episode (if any)
-  const currentEpisode = room.episodes.find((e) => e.id === room.current_episode_id) || room.episodes[0] || null;
+  // Active current episode from queue or room snapshot
+  const effectiveCurrentEpisodeId = queueCurrentEpisodeId || room.current_episode_id;
+  const episodeList = queue.length > 0 ? queue : room.episodes;
+  const currentEpisode =
+    episodeList.find((e) => e.id === effectiveCurrentEpisodeId) ||
+    episodeList[0] ||
+    null;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -341,7 +372,40 @@ export const RoomPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Watch Stage & Verification Area (2 Cols) */}
         <div className="lg:col-span-2 space-y-6">
-          <Card variant="elevated" className="p-0 overflow-hidden border-void-600/80">
+          {/* Phase 6: Queue Finished Notice */}
+          {isQueueFinished && (
+            <div className="flex items-center justify-between p-4 rounded-xl bg-violet-950/80 border border-violet-700 text-white shadow-xl animate-in fade-in duration-200">
+              <div className="flex items-center gap-3">
+                <Sparkles className="w-5 h-5 text-pink-400 animate-pulse shrink-0" />
+                <div>
+                  <h4 className="text-sm font-bold">Watch Party Queue Finished!</h4>
+                  <p className="text-xs text-ink-muted">
+                    All episodes in the queue have been watched. Host can upload more episodes to keep going!
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsQueueFinished(false)}
+                className="text-xs shrink-0"
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+
+          <Card variant="elevated" className="p-0 overflow-hidden border-void-600/80 relative">
+            {/* Phase 6: Intermission Screen Overlay */}
+            {intermission && (
+              <IntermissionOverlay
+                intermission={intermission}
+                isHost={!!auth?.is_host}
+                onSkip={handleSkipIntermission}
+                onCancel={handleCancelIntermission}
+              />
+            )}
+
             {/* Phase 5: HTML5 Local Video Player Stage with Real-Time Sync */}
             {currentEpisode ? (
               <VideoPlayer
@@ -362,6 +426,7 @@ export const RoomPage: React.FC = () => {
                 syncStatus={syncStatus}
                 latencyMs={latencyMs}
                 driftSeconds={driftSeconds}
+                onEnded={handleVideoEnded}
               />
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
@@ -502,8 +567,25 @@ export const RoomPage: React.FC = () => {
           )}
         </div>
 
-        {/* Sidebar: Real-time Participants & Info (1 Col) */}
+        {/* Sidebar: Episode Queue & Real-time Participants (1 Col) */}
         <div className="space-y-6">
+          {/* Phase 6: Episode Queue Component */}
+          <EpisodeQueue
+            episodes={episodeList}
+            currentEpisodeId={effectiveCurrentEpisodeId || null}
+            isHost={!!auth?.is_host}
+            onSelectEpisode={handleSelectEpisode}
+            onRemoveEpisode={handleRemoveEpisode}
+            onReorderQueue={handleReorderQueue}
+            onOpenUploadModal={() => setShowUploadModal(true)}
+            onDownloadEpisode={(ep) => {
+              if (auth) {
+                window.open(api.getDownloadUrl(ep.id, auth.participant_id, auth.session_token), '_blank');
+              }
+            }}
+            verifiedEpisodeId={currentParticipant?.status === 'VERIFIED' ? currentEpisode?.id : null}
+          />
+
           <Card variant="default">
             <div className="flex items-center justify-between pb-3 border-b border-void-700/60 mb-4">
               <div className="flex items-center gap-2">

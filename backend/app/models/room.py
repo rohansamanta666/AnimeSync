@@ -25,6 +25,11 @@ class Room(Base):
     )
 
     participants = relationship("Participant", back_populates="room", cascade="all, delete-orphan")
-    episodes = relationship("Episode", back_populates="room", cascade="all, delete-orphan")
+    episodes = relationship(
+        "Episode",
+        back_populates="room",
+        cascade="all, delete-orphan",
+        order_by="Episode.queue_position"
+    )
     messages = relationship("Message", back_populates="room", cascade="all, delete-orphan")
 

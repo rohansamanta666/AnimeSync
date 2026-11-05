@@ -1,4 +1,4 @@
-import { HealthInfo, Room, RoomAuth, Episode } from '../types';
+import { HealthInfo, Room, RoomAuth, Episode, QueueResponse } from '../types';
 
 const API_BASE = '/api';
 
@@ -59,6 +59,54 @@ export const api = {
     return request<RoomAuth>(`/rooms/${code.toUpperCase()}/join`, {
       method: 'POST',
       body: JSON.stringify({ username }),
+    });
+  },
+
+  async getQueue(code: string): Promise<QueueResponse> {
+    return request<QueueResponse>(`/rooms/${code.toUpperCase()}/queue`);
+  },
+
+  async reorderQueue(
+    code: string,
+    orderedEpisodeIds: string[],
+    auth: { participantId: string; sessionToken: string }
+  ): Promise<QueueResponse> {
+    return request<QueueResponse>(`/rooms/${code.toUpperCase()}/queue/reorder`, {
+      method: 'PUT',
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
+      body: JSON.stringify({ ordered_episode_ids: orderedEpisodeIds }),
+    });
+  },
+
+  async removeFromQueue(
+    code: string,
+    episodeId: string,
+    auth: { participantId: string; sessionToken: string }
+  ): Promise<QueueResponse> {
+    return request<QueueResponse>(`/rooms/${code.toUpperCase()}/queue/${episodeId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
+    });
+  },
+
+  async selectEpisode(
+    code: string,
+    episodeId: string,
+    auth: { participantId: string; sessionToken: string }
+  ): Promise<QueueResponse> {
+    return request<QueueResponse>(`/rooms/${code.toUpperCase()}/queue/select`, {
+      method: 'POST',
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
+      body: JSON.stringify({ episode_id: episodeId }),
     });
   },
 

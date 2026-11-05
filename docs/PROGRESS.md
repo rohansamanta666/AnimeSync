@@ -1,10 +1,9 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 5 (Synchronized Video Player) — **COMPLETED (Tasks 5.1–5.6 Completed & Verified)**
-- **Next Task**: **Phase 6 — Task 6.1: Episode Queue Data Model and API/Socket Events**
+- **Current Phase**: Phase 6 (Episode Queue & Auto-Next Workflow) — **COMPLETED (Tasks 6.1–6.5 Fully Completed & Verified)**
+- **Next Task**: **Phase 7 — Task 7.1: Real-Time Text Chat with Message Persistence & Input Sanitization**
 - **Git Branch**: `main`
-- **Latest Commit**: `63a563d` (`feat(phase-5): implement manual resync and sync health diagnostics UI (task 5.6)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -20,7 +19,7 @@
 | **Phase 3** | Video Distribution & File Verification | **COMPLETED** | 100% |
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
 | **Phase 5** | Synchronized Video Player | **COMPLETED** | 100% |
-| **Phase 6** | Episode Queue & Auto-Next | Pending | 0% |
+| **Phase 6** | Episode Queue & Auto-Next | **COMPLETED** | 100% |
 | **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
 | **Phase 9** | Testing, Security & Free Deployment | Pending | 0% |
@@ -160,15 +159,37 @@
   - 4 automated backend tests in `test_sync.py` covering ping measurement, resync during active playback, resync while paused, and resync during buffering.
   - 10 automated frontend unit tests in `sync_health.test.ts` covering status resolution, ping calculation, and resync target alignment.
 
+### Phase 6: Episode Queue & Auto-Next Workflow
+- [x] **Task 6.1: Room Episode Queue Data Model & API/Socket Events (`QueueManager`, `rooms.py`, `server.py`)**:
+  - `QueueManager` service providing contiguous queue ordering, addition, deletion with index compaction, reordering, and next episode queries.
+  - REST endpoints: `GET /api/rooms/{code}/queue`, `PUT /api/rooms/{code}/queue/reorder`, `DELETE /api/rooms/{code}/queue/{id}`, `POST /api/rooms/{code}/queue/select` with host-only authorization enforcement.
+  - Socket.IO handlers: `get_queue`, `reorder_queue`, `remove_from_queue`, `select_episode` with real-time `queue_updated` broadcasts.
+- [x] **Task 6.2: Episode Queue UI (`EpisodeQueue.tsx`, `useEpisodeQueue.ts`, `RoomPage.tsx`)**:
+  - Japanese dark theme queue list showing upcoming episodes in order with position badges (#1, #2...), file size, and "Playing" status indicator.
+  - Host controls: Move Up / Move Down reordering buttons, "Play Now" episode switcher, and deletion buttons.
+  - Peer controls: Download button for upcoming episodes so friends can download future episodes ahead of time.
+  - Optimistic client-side updates with instant fallback and error resilience.
+- [x] **Task 6.3: Video `ended` Coordination with Duplicate Protection (`playback_manager.py`, `server.py`)**:
+  - Capture HTML5 `<video>` `ended` event across participants and emit `playback_ended`.
+  - Authoritative duplicate protection: `playback_manager.record_episode_ended` uses a 15-second cooldown to deduplicate concurrent emissions from multiple clients so intermission is triggered exactly once.
+- [x] **Task 6.4: Intermission Screen (`IntermissionOverlay.tsx`, `server.py`)**:
+  - Ambient full-stage intermission overlay when video ends.
+  - Displays "Episode Complete!", up next episode metadata preview (title, season, episode, size), and ticking 15s countdown with progress bar.
+  - Host controls: "Play Next Now" (skips countdown via `skip_intermission`) and "Stay on Current" (cancels countdown via `cancel_intermission`).
+  - Automatic celebration banner when all queued episodes finish (`queue_finished`).
+- [x] **Task 6.5: Auto-Next Readiness Reset Enforcement (`server.py`, `RoomPage.tsx`)**:
+  - When auto-advancing to the next episode, `invalidate_room_readiness` resets all participants (including `WATCHING`) back to `WAITING_FOR_FILE` and clears verified file hashes.
+  - Unloads previous video file locally (`setLocalVideoFile(null)`).
+  - Guarantees that neither participant can mark Ready or begin synchronized playback until the new episode's SHA-256 hash is computed and verified.
+
 ---
 
 ## 4. In-Progress Features
-- **Phase 5: Synchronized Video Player** — **COMPLETED** (Tasks 5.1–5.6 fully implemented, verified, and committed).
+- **Phase 6: Episode Queue & Auto-Next Workflow** — **COMPLETED** (Tasks 6.1–6.5 fully implemented, verified, and committed).
 
 ---
 
 ## 5. Pending Features
-- Phase 6: Room queue, intermission screen, auto-next flow.
 - Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
 - Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
 - Phase 9: End-to-end testing, security audits, Cloudflare Quick Tunnel integration.
@@ -181,6 +202,7 @@
   - **Browser Background Tab Throttling**: Modern browsers throttle `setInterval` timers (e.g. 2s drift check interval) in background/minimized tabs. When refocusing the tab, drift correction catches up on the subsequent tick, or the user can press `Shift+R` to manually trigger an immediate resync.
   - **Client System Clock Skew**: Latency telemetry relies on client timestamps (`Date.now()`); to guard against negative latency from sudden OS clock shifts, calculations are clamped to 0ms.
   - **Browser Codec Compatibility**: Playback uses native HTML5 `<video>`; video files encoded with unsupported codecs trigger the player's custom codec alert prompting the user to load a standard H.264/AAC MP4 or WebM file.
+  - **Concurrent Video Ended Events**: Multiple viewers reaching video end concurrently are deduplicated through server monotonic epoch cooldowns.
 
 ---
 
@@ -190,46 +212,37 @@
 - `backend/tests/test_upload.py` (3 tests) — **PASSED**
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
 - `backend/tests/test_sync.py` (26 tests) — **PASSED**
-  - `test_playback_manager_initial_state`: Initial state defaults.
-  - `test_playback_manager_play_action`: PLAY action updates is_playing and sequence.
-  - `test_playback_manager_pause_action`: PAUSE action updates is_playing and records position.
-  - `test_playback_manager_seek_action`: SEEK action updates current_time to non-negative target.
-  - `test_playback_manager_rate_change`: RATE_CHANGE action updates speed within [0.25, 4.0].
-  - `test_playback_manager_invalid_actions_and_values`: Rejection of invalid action strings, negative timestamps, out-of-bounds rates.
-  - `test_playback_manager_time_progression`: Authoritative time progression calculation while playing vs static position while paused.
-  - `test_socket_playback_action_unauthenticated`: Rejection of unauthenticated socket connections.
-  - `test_socket_playback_action_room_isolation_mismatch`: Rejection of commands with mismatched room_code (room isolation).
-  - `test_socket_playback_action_readiness_gate_rejection`: Readiness gate enforcement (rejecting unverified participants).
-  - `test_socket_playback_action_play_pause_seek_rate_lifecycle`: Full socket event lifecycle verifying `playback_sync` broadcast with `originating_socket_id` and monotonic sequence numbers.
-  - `test_two_participants_playback_sync_and_echo_suppression`: Two-client watch party simulation verifying echo suppression via `originating_socket_id` and non-originating client application.
-  - `test_cross_room_playback_isolation`: Strict channel isolation ensuring Room 1 playback broadcasts are never delivered to Room 2.
-  - `test_get_playback_state_socket_handler`: Direct authoritative playback state querying via Socket.IO.
-  - `test_authoritative_drift_formula_consistency`: Validates server authoritative time matches client drift thresholds.
-  - `test_playback_manager_buffering_coordination_and_recovery`: Unit test for shared pause on buffer and resume when all ready.
-  - `test_playback_manager_buffering_while_paused_no_autoresume`: Buffering while paused does not trigger auto-resume.
-  - `test_playback_manager_manual_pause_overrides_buffering_resume`: User manual pause cancels auto-resume.
-  - `test_socket_buffering_start_and_end_lifecycle`: Full Socket.IO buffering start and end lifecycle.
-  - `test_socket_buffering_multiple_participants_coordination`: Multi-participant buffering coordination (resumes only when last viewer ready).
-  - `test_socket_buffering_disconnect_recovery`: Disconnect during buffering automatically resumes remaining viewers.
-  - `test_socket_buffering_unverified_rejected`: Unverified participant cannot trigger buffering coordination.
-  - `test_ping_check_latency_measurement`: Ping/pong latency measurement handler test.
-  - `test_manual_resync_alignment_playing`: Authoritative time alignment while playing.
-  - `test_manual_resync_alignment_paused`: Authoritative position alignment while paused.
-  - `test_manual_resync_alignment_buffering_preservation`: Preserves buffering pause state during manual resync.
+- `backend/tests/test_queue.py` (10 tests) — **PASSED**
+  - `test_queue_manager_get_and_order`: Verifies contiguous queue order.
+  - `test_queue_manager_reorder`: Verifies reordering queue items by ID list.
+  - `test_queue_manager_remove_and_compact`: Verifies episode removal from DB and disk with index compaction.
+  - `test_queue_manager_get_next_episode`: Validates querying next episode and end-of-queue detection.
+  - `test_rest_queue_endpoints_lifecycle`: API test of GET, PUT, POST, DELETE queue endpoints and 403 authorization checks.
+  - `test_socket_playback_ended_duplicate_protection`: Verifies deduplication of concurrent `playback_ended` emissions.
+  - `test_socket_playback_ended_last_episode`: Verifies `queue_finished` emission on queue completion.
+  - `test_socket_intermission_cancel_and_skip`: Validates intermission lifecycle, cancel, and fast-forward skip.
+  - `test_auto_next_readiness_reset_enforcement`: Verifies reset of all participants (including WATCHING) to WAITING_FOR_FILE on auto-next.
+  - `test_socket_queue_crud_events`: End-to-end Socket.IO events for get_queue, reorder_queue, select_episode, remove_from_queue.
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2118 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 46 backend tests + 30 frontend unit tests + Vite build)
+- `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
+  - `reorderEpisodeList`: Explicit ID list reordering and clean unmentioned appending.
+  - `findNextEpisode`: Subsequent episode lookups, boundary checks, and empty queue safety.
+  - `computeIntermissionSecondsRemaining`: Ceiling calculation and non-negative clamping for past targets.
+  - `isDuplicateEndedEvent`: Client-side duplicate detection during cooldown, expiration, and distinct episode handling.
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,121 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 56 backend tests + 41 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 6: Episode Queue & Auto-Next Workflow**:
-  - Task 6.1: Implement Room Episode Queue data model and API/Socket events (`add_to_queue`, `remove_from_queue`, `reorder_queue`).
-  - Task 6.2: Build episode queue UI showing upcoming episodes, download status, and verification badges.
-  - Task 6.3: Implement video `ended` event coordination with duplicate protection.
-  - Task 6.4: Build Intermission Screen showing next episode details, per-participant verification requirements, and countdown.
-  - Task 6.5: Verify that Auto-Next enforces Ready-to-Watch requirements before advancing playback.
+- **Phase 7: Text Chat & WebRTC Voice System**:
+  - Task 7.1: Implement real-time text chat with Socket.IO, message persistence, timestamps, and input sanitization.
+  - Task 7.2: Implement WebRTC voice signaling over Socket.IO (`voice_offer`, `voice_answer`, `ice_candidate`).
+  - Task 7.3: Integrate free Google public STUN servers for NAT traversal.
+  - Task 7.4: Build Voice UI: Join/Leave voice, Mute/Unmute microphone, Audio device selection, Speaking indicator.
+  - Task 7.5: Implement Push-to-Talk (PTT) with key shortcut `V`, keyup safety guarantees, and manual mute precedence.
+  - Task 7.6: Implement Independent Audio Architecture (Anime volume slider vs Peer Voice GainNode 0–200%).
 
 ---
 
@@ -245,3 +258,7 @@
 - **Tiered Adaptive Playback Drift Correction**: Micro-drift ($0.25$s to $1.5$s) uses imperceptible $\pm 5\%$ speed nudges, completely avoiding jarring audio stutters or seeks; macro-drift ($\ge 1.5$s) immediately seeks. Intended speed is faithfully restored upon re-alignment.
 - **Server-Coordinated Buffering with Disconnect Recovery**: Shared pause triggered when any viewer buffers; playback resumes authoritatively with `originating_socket_id="server"` when all buffering viewers finish. Disconnecting viewers are automatically cleared so remaining viewers are never stalled indefinitely.
 - **One-Click Manual Resync & Diagnostics**: Manual Resync hard-aligns player directly with server state while preserving paused/buffering status; live ping and drift metrics give viewers complete confidence in synchronization health.
+- **Contiguous Queue Positions & Zero-Cost Reordering**: Queue re-compacting ensures contiguous indices without gaps. Host-only authorizations protect playlist modifications.
+- **Duplicate Ended Protection with Server Monotonic Cooldown**: Multiple concurrent `playback_ended` emissions from room participants are deduplicated via server-side 15s cooldown.
+- **Strict Ready Gate Invariance on Auto-Next**: Auto-Next strictly resets participants to `WAITING_FOR_FILE`, preserving the invariant that no participant watches without verified local files.
+- **Wall-Clock Intermission Synchronization**: Intermission ticker uses wall-clock target epoch timestamps (`target_advance_time`) ensuring exact synchronization across tabs and client clocks.
