@@ -4,6 +4,7 @@
 - **Current Phase**: Phase 6 (Episode Queue & Auto-Next Workflow) — **COMPLETED (Tasks 6.1–6.5 Fully Completed & Verified)**
 - **Next Task**: **Phase 7 — Task 7.1: Real-Time Text Chat with Message Persistence & Input Sanitization**
 - **Git Branch**: `main`
+- **Latest Commit**: `50b5849` (`feat(phase-6): implement episode queue, auto-next workflow and intermission screen (tasks 6.1-6.5)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
