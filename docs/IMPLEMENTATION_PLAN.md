@@ -79,12 +79,12 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ---
 
 ## Phase 7 — Chat & WebRTC Voice System
-- [ ] Task 7.1: Implement real-time text chat with Socket.IO, message persistence, timestamps, and input sanitization.
-- [ ] Task 7.2: Implement WebRTC voice signaling over Socket.IO (`voice_offer`, `voice_answer`, `ice_candidate`).
-- [ ] Task 7.3: Integrate free Google public STUN servers for NAT traversal.
-- [ ] Task 7.4: Build Voice UI: Join/Leave voice, Mute/Unmute microphone, Audio device selection, Speaking indicator.
-- [ ] Task 7.5: Implement Push-to-Talk (PTT) with key shortcut `V`, keyup safety guarantees, and manual mute precedence.
-- [ ] Task 7.6: Implement Independent Audio Architecture:
+- [x] Task 7.1: Implement real-time text chat with Socket.IO, message persistence, timestamps, and input sanitization.
+- [x] Task 7.2: Implement WebRTC voice signaling over Socket.IO (`voice_offer`, `voice_answer`, `ice_candidate`).
+- [x] Task 7.3: Integrate free Google public STUN servers for NAT traversal.
+- [x] Task 7.4: Build Voice UI: Join/Leave voice, Mute/Unmute microphone, Audio device selection, Speaking indicator.
+- [x] Task 7.5: Implement Push-to-Talk (PTT) with key shortcut `V`, keyup safety guarantees, and manual mute precedence.
+- [x] Task 7.6: Implement Independent Audio Architecture:
   - Anime volume slider (HTML5 video gain).
   - Remote voice volume slider (Web Audio API `GainNode` 0–200%).
   - Local mute of remote peer without remote microphone muting.

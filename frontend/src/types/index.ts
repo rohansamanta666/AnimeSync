@@ -135,6 +135,38 @@ export interface ChatMessage {
   created_at: string;
 }
 
+export interface MessageListResponse {
+  room_code: string;
+  messages: ChatMessage[];
+}
+
+export type VoiceMode = 'activity' | 'ptt';
+
+export interface VoicePeer {
+  participant_id: string;
+  username: string;
+  socket_id: string;
+  is_muted: boolean;
+}
+
+export interface VoiceOfferPayload {
+  sender_socket_id: string;
+  sender_participant_id: string;
+  sender_username: string;
+  sdp: RTCSessionDescriptionInit;
+}
+
+export interface VoiceAnswerPayload {
+  sender_socket_id: string;
+  sender_participant_id: string;
+  sdp: RTCSessionDescriptionInit;
+}
+
+export interface VoiceIceCandidatePayload {
+  sender_socket_id: string;
+  candidate: RTCIceCandidateInit;
+}
+
 export interface StorageInfo {
   total_bytes: number;
   used_bytes: number;

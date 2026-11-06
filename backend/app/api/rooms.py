@@ -5,6 +5,7 @@ from backend.app.database import get_db
 from backend.app.models.participant import Participant
 from backend.app.services.room_manager import RoomManager
 from backend.app.services.queue_manager import QueueManager
+from backend.app.services.chat_service import ChatService
 from backend.app.schemas.room import (
     RoomCreateRequest,
     RoomJoinRequest,
@@ -15,6 +16,11 @@ from backend.app.schemas.room import (
     QueueResponse,
     QueueReorderRequest,
     QueueSelectRequest,
+)
+from backend.app.schemas.message import (
+    MessageCreate,
+    MessageResponse,
+    MessageListResponse,
 )
 from backend.app.sockets import sio
 from backend.app.sockets.server import invalidate_room_readiness
@@ -221,4 +227,63 @@ async def select_current_episode(
         current_episode_id=episode.id,
         episodes=[EpisodeResponse.model_validate(ep) for ep in episodes],
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Text Chat API Endpoints (Task 7.1)
+# ---------------------------------------------------------------------------
+
+@router.get("/{code}/messages", response_model=MessageListResponse)
+async def get_room_messages(
+    code: str,
+    limit: int = 100,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Fetches chronological chat history for a room."""
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    await _authenticate_participant(db, room.id, participant_id, session_token)
+    messages = await ChatService.get_recent_messages(db, room.id, limit=limit)
+
+    return MessageListResponse(
+        room_code=room.code,
+        messages=[MessageResponse.model_validate(m) for m in messages],
+    )
+
+
+@router.post("/{code}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_room_message(
+    code: str,
+    req: MessageCreate,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sends a chat message, sanitizes input, persists, and broadcasts over Socket.IO."""
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    participant = await _authenticate_participant(db, room.id, participant_id, session_token)
+
+    try:
+        msg = await ChatService.create_message(
+            db=db,
+            room_id=room.id,
+            participant_id=participant.id,
+            username=participant.username,
+            content=req.content,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    msg_dict = ChatService.serialize_message(msg)
+    await sio.emit("new_message", {"message": msg_dict}, room=room.code)
+
+    return MessageResponse.model_validate(msg)
+
 

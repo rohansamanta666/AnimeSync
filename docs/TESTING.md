@@ -84,6 +84,15 @@ Located in `backend/tests/`:
   - `test_socket_intermission_cancel_and_skip`: Validates intermission countdown lifecycle, host cancellation, and manual fast-forward skip.
   - `test_auto_next_readiness_reset_enforcement`: Verifies that advancing to the next episode strictly resets all room participants (including `WATCHING`) back to `WAITING_FOR_FILE` and clears verified hashes so readiness gates are enforced.
   - `test_socket_queue_crud_events`: End-to-end Socket.IO events for `get_queue`, `reorder_queue`, `select_episode`, and `remove_from_queue`.
+- **`test_chat_and_voice.py`** (Phase 7 Tasks 7.1 – 7.6):
+  - `test_chat_service_sanitize_message_content`: Verifies stripping of HTML tags, HTML entity conversion, length boundary enforcement (1–1000 characters), and empty content validation.
+  - `test_chat_service_create_and_get_messages`: Tests persistence of messages in SQLite database and chronological retrieval of recent messages.
+  - `test_rest_messages_endpoints_lifecycle`: Tests `GET /api/rooms/{code}/messages` and `POST /api/rooms/{code}/messages` with session authentication and room isolation.
+  - `test_socket_chat_send_and_receive`: End-to-end Socket.IO message exchange and room-wide `new_message` broadcasts.
+  - `test_socket_chat_unauthenticated_rejected`: Rejection of chat emissions from unauthenticated socket connections.
+  - `test_voice_manager_lifecycle`: Tests in-memory `VoiceManager` add, remove, mute toggle, and peer listing.
+  - `test_voice_socket_join_leave_lifecycle`: Tests Socket.IO `voice_join` and `voice_leave` signaling events with presence updates.
+  - `test_voice_socket_webrtc_signaling`: Tests WebRTC signaling relay (`voice_offer`, `voice_answer`, `voice_ice_candidate`, `voice_mute_toggle`).
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -106,6 +115,13 @@ Located in `frontend/tests/`:
   - `findNextEpisode`: verifies next episode lookups, boundary handling for last episode, null current episode fallback, and empty queue safety.
   - `computeIntermissionSecondsRemaining`: verifies ceiling calculation and non-negative clamping for past targets.
   - `isDuplicateEndedEvent`: verifies client-side duplicate detection during cooldown, expiration after cooldown, and distinct episode handling.
+- **`chat_voice.test.ts`** (18 unit tests, Tasks 7.1 – 7.6):
+  - `RTC_CONFIG`: Free Google STUN server configuration for zero-cost NAT traversal.
+  - `getAudioConstraints`: Configures echo cancellation, noise suppression, AGC, and deviceId binding.
+  - `volumeToGain`: Maps volume percentage (0% to 200%) to Web Audio Gain values (0.0 to 2.0).
+  - `computeAudioRms`: Audio RMS speaking detection across silence, active waveforms, and empty buffers.
+  - `isTypingElement`: Input element detection for PTT key 'V' safety.
+  - `sanitizeChatMessage`: Client-side tag stripping, whitespace trimming, and null byte removal.
 
 ---
 

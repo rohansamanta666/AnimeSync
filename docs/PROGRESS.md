@@ -1,10 +1,10 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 6 (Episode Queue & Auto-Next Workflow) — **COMPLETED (Tasks 6.1–6.5 Fully Completed & Verified)**
-- **Next Task**: **Phase 7 — Task 7.1: Real-Time Text Chat with Message Persistence & Input Sanitization**
+- **Current Phase**: Phase 7 (Chat & WebRTC Voice System) — **COMPLETED (Tasks 7.1–7.6 Fully Completed & Verified)**
+- **Next Task**: **Phase 8 — Task 8.1: Implement Discord-Inspired Collapsible Watch-Room Sidebar**
 - **Git Branch**: `main`
-- **Latest Commit**: `50b5849` (`feat(phase-6): implement episode queue, auto-next workflow and intermission screen (tasks 6.1-6.5)`)
+- **Latest Commit**: `968a71d` (`feat(phase-7): implement real-time text chat and WebRTC voice system (tasks 7.1-7.6)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -21,7 +21,7 @@
 | **Phase 4** | Ready-to-Watch System | **COMPLETED** | 100% |
 | **Phase 5** | Synchronized Video Player | **COMPLETED** | 100% |
 | **Phase 6** | Episode Queue & Auto-Next | **COMPLETED** | 100% |
-| **Phase 7** | Text Chat & WebRTC Voice | Pending | 0% |
+| **Phase 7** | Text Chat & WebRTC Voice | **COMPLETED** | 100% |
 | **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
 | **Phase 9** | Testing, Security & Free Deployment | Pending | 0% |
 
@@ -183,16 +183,54 @@
   - Unloads previous video file locally (`setLocalVideoFile(null)`).
   - Guarantees that neither participant can mark Ready or begin synchronized playback until the new episode's SHA-256 hash is computed and verified.
 
+### Phase 7: Text Chat & WebRTC Voice System
+- [x] **Task 7.1: Real-Time Text Chat with Message Persistence & Input Sanitization (`chat_service.py`, `rooms.py`, `server.py`, `useChat.ts`, `ChatPanel.tsx`)**:
+  - Server-side `ChatService` with HTML tag stripping, null byte removal, length boundary validation (1–1000 characters), and HTML entity escaping.
+  - Database persistence: saves messages to SQLite `messages` table via async SQLAlchemy sessions.
+  - REST endpoints: `GET /api/rooms/{code}/messages` (retrieves recent message history) and `POST /api/rooms/{code}/messages` (authenticated message creation).
+  - Real-time Socket.IO events: `send_message` and `get_messages`, broadcasting `new_message` to room participants.
+  - Frontend `useChat` hook: provides message history, optimistic chat updates, and client-side sanitization.
+  - `ChatPanel.tsx` UI: auto-scrolling message list, Japanese dark mode styling, sender badges (Host vs Peer, You vs Peer), timestamps, error notices, and char counter.
+- [x] **Task 7.2: WebRTC Voice Signaling through Socket.IO (`voice_manager.py`, `server.py`, `useWebRTCVoice.ts`)**:
+  - In-memory `VoiceManager` tracking active voice participants per room and mute states.
+  - Mesh signaling events: `voice_join`, `voice_leave`, `voice_offer`, `voice_answer`, `voice_ice_candidate`, and `voice_mute_toggle`.
+  - Targeted delivery of offers, answers, and ICE candidates using `target_socket_id`.
+  - Disconnect cleanup: removes departed participants from voice room and emits `voice_peer_left`.
+- [x] **Task 7.3: Free Google Public STUN NAT Traversal (`webrtc.ts`)**:
+  - Standard zero-cost `RTC_CONFIG` using Google public STUN servers (`stun:stun.l.google.com:19302` through `stun4`).
+  - Strict zero-cost compliance: operates with no paid TURN servers. Notice: STUN works across standard domestic NATs and home LANs, while restrictive symmetric enterprise firewalls would require TURN in cloud deployments.
+- [x] **Task 7.4: Voice Controls, Permissions & Speaking Indicators (`VoiceControlBar.tsx`, `useWebRTCVoice.ts`)**:
+  - Join/Leave voice channel controls with visual connection states.
+  - Microphone mute/unmute toggle with hardware track muting and room mute event broadcasting.
+  - Live speaking detection using Web Audio API `AnalyserNode` calculating root-mean-square (RMS) amplitude over time domain bytes.
+  - Glowing speaking indicator rings around avatars in voice list and sidebar tab badges.
+  - Microphone device enumeration and dynamic input device selection (`enumerateDevices` & `getUserMedia({ deviceId: { exact } })`).
+  - Comprehensive microphone permission error handling and inline retry UI.
+- [x] **Task 7.5: Push-to-Talk (PTT) with Key Shortcut `V` (`useWebRTCVoice.ts`)**:
+  - Voice mode selector: switchable between "Voice Activity" and "Push-to-Talk".
+  - Key shortcut `V`: microphone track is unmuted only while key `V` is pressed down.
+  - Triple Keyup Safety Guarantees:
+    - Normal `keyup` event releases microphone immediately.
+    - Window `blur` event automatically mutes microphone if window loses focus.
+    - Document `visibilitychange` event mutes microphone if browser tab is switched or minimized.
+  - Input field suppression: `isTypingElement` inspects target element so typing `v` in text inputs or chat never activates the microphone.
+  - Manual mute precedence: if the user explicitly clicks Mute, pressing `V` does not transmit audio.
+- [x] **Task 7.6: Independent Anime & Peer Audio Pipeline (`webrtc.ts`, `useWebRTCVoice.ts`, `VoiceControlBar.tsx`)**:
+  - Completely independent audio architecture:
+    - Anime soundtrack volume is controlled directly on native HTML5 `<video>` element.
+    - Remote peer voices are routed through Web Audio API: `AudioContext -> MediaStreamAudioSourceNode -> AnalyserNode -> GainNode -> destination`.
+  - Independent peer volume slider (0% to 200%) mapping volume percent directly to Web Audio `GainNode.gain.value` (0.0 to 2.0).
+  - Local peer mute toggle: allows muting the remote peer locally in headphones without disabling their microphone or affecting the anime soundtrack.
+
 ---
 
 ## 4. In-Progress Features
-- **Phase 6: Episode Queue & Auto-Next Workflow** — **COMPLETED** (Tasks 6.1–6.5 fully implemented, verified, and committed).
+- **Phase 7: Text Chat & WebRTC Voice System** — **COMPLETED** (Tasks 7.1–7.6 fully implemented, verified, and committed).
 
 ---
 
 ## 5. Pending Features
-- Phase 7: Text chat, WebRTC P2P voice with Google STUN, Push-to-Talk (`V`), independent audio gains.
-- Phase 8: Discord-inspired collapsible watch-room sidebar, fullscreen autohide, external subtitles, storage cleanup.
+- Phase 8: Discord-inspired collapsible watch-room sidebar, participant profile popover, fullscreen autohide, external subtitles, storage cleanup.
 - Phase 9: End-to-end testing, security audits, Cloudflare Quick Tunnel integration.
 
 ---
@@ -204,6 +242,8 @@
   - **Client System Clock Skew**: Latency telemetry relies on client timestamps (`Date.now()`); to guard against negative latency from sudden OS clock shifts, calculations are clamped to 0ms.
   - **Browser Codec Compatibility**: Playback uses native HTML5 `<video>`; video files encoded with unsupported codecs trigger the player's custom codec alert prompting the user to load a standard H.264/AAC MP4 or WebM file.
   - **Concurrent Video Ended Events**: Multiple viewers reaching video end concurrently are deduplicated through server monotonic epoch cooldowns.
+  - **WebRTC STUN vs Symmetric NAT**: Uses free public Google STUN servers. Works seamlessly over typical home NATs, mobile hotspots, and direct connections; strict enterprise symmetric firewalls would require TURN in cloud deployments.
+  - **Microphone Permissions**: Rejection or lack of microphone hardware displays clear non-blocking alerts with device re-selection.
 
 ---
 
@@ -214,36 +254,38 @@
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
 - `backend/tests/test_sync.py` (26 tests) — **PASSED**
 - `backend/tests/test_queue.py` (10 tests) — **PASSED**
-  - `test_queue_manager_get_and_order`: Verifies contiguous queue order.
-  - `test_queue_manager_reorder`: Verifies reordering queue items by ID list.
-  - `test_queue_manager_remove_and_compact`: Verifies episode removal from DB and disk with index compaction.
-  - `test_queue_manager_get_next_episode`: Validates querying next episode and end-of-queue detection.
-  - `test_rest_queue_endpoints_lifecycle`: API test of GET, PUT, POST, DELETE queue endpoints and 403 authorization checks.
-  - `test_socket_playback_ended_duplicate_protection`: Verifies deduplication of concurrent `playback_ended` emissions.
-  - `test_socket_playback_ended_last_episode`: Verifies `queue_finished` emission on queue completion.
-  - `test_socket_intermission_cancel_and_skip`: Validates intermission lifecycle, cancel, and fast-forward skip.
-  - `test_auto_next_readiness_reset_enforcement`: Verifies reset of all participants (including WATCHING) to WAITING_FOR_FILE on auto-next.
-  - `test_socket_queue_crud_events`: End-to-end Socket.IO events for get_queue, reorder_queue, select_episode, remove_from_queue.
+- `backend/tests/test_chat_and_voice.py` (8 tests, Phase 7) — **PASSED**:
+  - `test_chat_service_sanitize_message_content`: Verifies stripping of HTML tags, entity encoding, length limits, and empty content rejection.
+  - `test_chat_service_create_and_get_messages`: Tests database message creation and recent message retrieval.
+  - `test_rest_messages_endpoints_lifecycle`: Tests `GET /api/rooms/{code}/messages` and `POST /api/rooms/{code}/messages` REST endpoints with auth checks.
+  - `test_socket_chat_send_and_receive`: End-to-end Socket.IO message exchange and room-wide `new_message` broadcasts.
+  - `test_socket_chat_unauthenticated_rejected`: Rejection of chat emissions from unauthenticated socket connections.
+  - `test_voice_manager_lifecycle`: Tests in-memory `VoiceManager` add, remove, mute toggle, and peer listing.
+  - `test_voice_socket_join_leave_lifecycle`: Tests Socket.IO `voice_join` and `voice_leave` signaling events.
+  - `test_voice_socket_webrtc_signaling`: Tests WebRTC signaling relay (`voice_offer`, `voice_answer`, `voice_ice_candidate`, `voice_mute_toggle`).
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
-  - `reorderEpisodeList`: Explicit ID list reordering and clean unmentioned appending.
-  - `findNextEpisode`: Subsequent episode lookups, boundary checks, and empty queue safety.
-  - `computeIntermissionSecondsRemaining`: Ceiling calculation and non-negative clamping for past targets.
-  - `isDuplicateEndedEvent`: Client-side duplicate detection during cooldown, expiration, and distinct episode handling.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,121 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 56 backend tests + 41 frontend unit tests + Vite build)
+- `frontend/tests/chat_voice.test.ts` (18 unit tests, Phase 7) — **PASSED**:
+  - `RTC_CONFIG`: Free Google STUN server configuration.
+  - `getAudioConstraints`: Echo cancellation, noise suppression, AGC, and deviceId binding.
+  - `volumeToGain`: Volume percentage (0%–200%) to Web Audio Gain mapping (0.0 to 2.0).
+  - `computeAudioRms`: Audio RMS speaking detection across silence, waveforms, and empty buffers.
+  - `isTypingElement`: Input element detection for PTT key safety.
+  - `sanitizeChatMessage`: Client-side tag stripping, whitespace trimming, and null byte removal.
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,126 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 64 backend tests + 59 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 7: Text Chat & WebRTC Voice System**:
-  - Task 7.1: Implement real-time text chat with Socket.IO, message persistence, timestamps, and input sanitization.
-  - Task 7.2: Implement WebRTC voice signaling over Socket.IO (`voice_offer`, `voice_answer`, `ice_candidate`).
-  - Task 7.3: Integrate free Google public STUN servers for NAT traversal.
-  - Task 7.4: Build Voice UI: Join/Leave voice, Mute/Unmute microphone, Audio device selection, Speaking indicator.
-  - Task 7.5: Implement Push-to-Talk (PTT) with key shortcut `V`, keyup safety guarantees, and manual mute precedence.
-  - Task 7.6: Implement Independent Audio Architecture (Anime volume slider vs Peer Voice GainNode 0–200%).
+- **Phase 8: Watch-Room Polish & UI/UX Experience**:
+  - Task 8.1: Implement Discord-inspired collapsible watch-room sidebar (participant list + chat + voice + queue).
+  - Task 8.2: Participant profile popover with individual voice volume slider and mute controls.
+  - Task 8.3: Fullscreen mode: automatically hide sidebar, chat, and queue, with cursor inactivity autohide.
+  - Task 8.4: Keyboard shortcuts: Space (play/pause), Left/Right (seek ±5s), F (fullscreen), M (mute anime), V (PTT).
+  - Task 8.5: External subtitle support: `.srt` and `.vtt` file parser with customizable font size, color, and background.
+  - Task 8.6: Media Management Dashboard: view disk usage, inspect stored videos, and manually delete files with confirmation.
 
 ---
 
@@ -258,6 +300,15 @@
 - **Quadruple-Layered Loop Prevention**: `originating_socket_id` matching + monotonic sequence numbering + `isApplyingRemoteRef` hook guard + `isRemoteActionRef` player handle lock prevents any feedback loops during remote sync.
 - **Tiered Adaptive Playback Drift Correction**: Micro-drift ($0.25$s to $1.5$s) uses imperceptible $\pm 5\%$ speed nudges, completely avoiding jarring audio stutters or seeks; macro-drift ($\ge 1.5$s) immediately seeks. Intended speed is faithfully restored upon re-alignment.
 - **Server-Coordinated Buffering with Disconnect Recovery**: Shared pause triggered when any viewer buffers; playback resumes authoritatively with `originating_socket_id="server"` when all buffering viewers finish. Disconnecting viewers are automatically cleared so remaining viewers are never stalled indefinitely.
+- **One-Click Manual Resync & Diagnostics**: Manual Resync hard-aligns player directly with server state while preserving paused/buffering status; live ping and drift metrics give viewers complete confidence in synchronization health.
+- **Contiguous Queue Positions & Zero-Cost Reordering**: Queue re-compacting ensures contiguous indices without gaps. Host-only authorizations protect playlist modifications.
+- **Duplicate Ended Protection with Server Monotonic Cooldown**: Multiple concurrent `playback_ended` emissions from room participants are deduplicated via server-side 15s cooldown.
+- **Strict Ready Gate Invariance on Auto-Next**: Auto-Next strictly resets participants to `WAITING_FOR_FILE`, preserving the invariant that no participant watches without verified local files.
+- **Wall-Clock Intermission Synchronization**: Intermission ticker uses wall-clock target epoch timestamps (`target_advance_time`) ensuring exact synchronization across tabs and client clocks.
+- **Free Google STUN NAT Traversal (Zero-Cost Compliance)**: Pure peer-to-peer WebRTC signaling via existing Socket.IO connection and free Google public STUN servers eliminates any need for paid TURN services.
+- **Independent Web Audio GainNode Routing**: Direct routing of remote peer streams through Web Audio API GainNode isolates voice amplification (0%–200%) and local mute completely from the native HTML5 `<video>` soundtrack.
+- **Triple-Failsafe Push-to-Talk (PTT)**: Mute on keyup, window blur, and document visibilitychange guarantees no microphone hot-mic leaks if the user switches tabs or applications while holding `V`.
+- **Typing Element Suppression for Hotkeys**: `isTypingElement` target inspection ensures that typing 'v' in chat or text inputs never activates the microphone.
 - **One-Click Manual Resync & Diagnostics**: Manual Resync hard-aligns player directly with server state while preserving paused/buffering status; live ping and drift metrics give viewers complete confidence in synchronization health.
 - **Contiguous Queue Positions & Zero-Cost Reordering**: Queue re-compacting ensures contiguous indices without gaps. Host-only authorizations protect playlist modifications.
 - **Duplicate Ended Protection with Server Monotonic Cooldown**: Multiple concurrent `playback_ended` emissions from room participants are deduplicated via server-side 15s cooldown.

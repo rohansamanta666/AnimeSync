@@ -11,8 +11,10 @@ from backend.app.models.room import Room
 from backend.app.models.participant import Participant, ParticipantStatus
 from backend.app.models.episode import Episode
 from backend.app.services.queue_manager import QueueManager
+from backend.app.services.chat_service import ChatService
 from backend.app.sockets.connection_manager import connection_manager
 from backend.app.sockets.playback_manager import playback_manager, RoomPlaybackState
+from backend.app.sockets.voice_manager import voice_manager
 
 # ---------------------------------------------------------------------------
 # Phase 4 & Phase 6: Per-room countdown and intermission task tracking
@@ -48,6 +50,19 @@ async def connect(sid: str, environ: dict, auth: dict = None):
 
 @sio.event
 async def disconnect(sid: str):
+    # Phase 7: Clean up voice participation on disconnect
+    removed_voice = voice_manager.remove_by_socket_id(sid)
+    for v_code, vp in removed_voice:
+        await sio.emit(
+            "voice_peer_left",
+            {
+                "participant_id": vp.participant_id,
+                "username": vp.username,
+                "socket_id": sid,
+            },
+            room=v_code,
+        )
+
     result = await connection_manager.unregister_connection(sid)
     if not result:
         return
@@ -1426,6 +1441,245 @@ async def select_episode(sid: str, data: dict = None):
         )
 
         return {"status": "OK", "current_episode_id": episode.id}
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: Text Chat & WebRTC Voice System (Tasks 7.1 – 7.6)
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def send_message(sid: str, data: dict = None):
+    """
+    Sends a chat message:
+    - Authenticates sender session
+    - Sanitizes message input (HTML stripping, entity encoding, length limits)
+    - Persists message in database
+    - Broadcasts new_message to all room participants
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    payload = data or {}
+    raw_content = payload.get("content", "")
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        try:
+            msg = await ChatService.create_message(
+                db=db,
+                room_id=room.id,
+                participant_id=session.participant_id,
+                username=session.username,
+                content=raw_content,
+            )
+        except ValueError as e:
+            return {"status": "ERROR", "message": str(e)}
+
+        msg_dict = ChatService.serialize_message(msg)
+        await sio.emit("new_message", {"message": msg_dict}, room=session.room_code)
+
+        return {"status": "OK", "message": msg_dict}
+
+
+@sio.event
+async def get_messages(sid: str, data: dict = None):
+    """Retrieves recent chronological chat messages for the room."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    limit = 100
+    if data and "limit" in data:
+        try:
+            limit = int(data["limit"])
+        except (ValueError, TypeError):
+            limit = 100
+
+    async with AsyncSessionLocal() as db:
+        room_res = await db.execute(select(Room).where(Room.code == session.room_code))
+        room = room_res.scalar_one_or_none()
+        if not room:
+            return {"status": "ERROR", "message": "Room not found"}
+
+        messages = await ChatService.get_recent_messages(db, room.id, limit=limit)
+        msg_dicts = [ChatService.serialize_message(m) for m in messages]
+
+        return {"status": "OK", "messages": msg_dicts}
+
+
+# ---------------------------------------------------------------------------
+# WebRTC Voice Signaling Handlers (Task 7.2)
+# ---------------------------------------------------------------------------
+
+@sio.event
+async def voice_join(sid: str, data: dict = None):
+    """
+    Participant joins the room voice channel:
+    - Registers in voice_manager
+    - Returns list of current voice peers to the joining participant
+    - Broadcasts voice_peer_joined to other participants in the room
+    """
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    is_muted = bool((data or {}).get("is_muted", False))
+    vp = voice_manager.join_voice(
+        room_code=session.room_code,
+        participant_id=session.participant_id,
+        username=session.username,
+        socket_id=sid,
+        is_muted=is_muted,
+    )
+
+    # Find other peers currently in voice
+    peers = [
+        p.to_dict()
+        for p in voice_manager.get_participants(session.room_code)
+        if p.socket_id != sid
+    ]
+
+    # Notify other participants that a new peer joined voice
+    await sio.emit(
+        "voice_peer_joined",
+        vp.to_dict(),
+        room=session.room_code,
+        skip_sid=sid,
+    )
+
+    return {
+        "status": "OK",
+        "peers": peers,
+        "current_user": vp.to_dict(),
+    }
+
+
+@sio.event
+async def voice_leave(sid: str, data: dict = None):
+    """Participant leaves the voice channel."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    vp = voice_manager.leave_voice(session.room_code, session.participant_id)
+    if vp:
+        await sio.emit(
+            "voice_peer_left",
+            {
+                "participant_id": session.participant_id,
+                "username": session.username,
+                "socket_id": sid,
+            },
+            room=session.room_code,
+        )
+
+    return {"status": "OK"}
+
+
+@sio.event
+async def voice_offer(sid: str, data: dict = None):
+    """Relays a WebRTC SDP offer from sender to target peer."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    payload = data or {}
+    target_sid = payload.get("target_socket_id")
+    sdp = payload.get("sdp")
+
+    if not target_sid or not sdp:
+        return {"status": "ERROR", "message": "Missing target_socket_id or sdp"}
+
+    await sio.emit(
+        "voice_offer",
+        {
+            "sender_socket_id": sid,
+            "sender_participant_id": session.participant_id,
+            "sender_username": session.username,
+            "sdp": sdp,
+        },
+        to=target_sid,
+    )
+    return {"status": "OK"}
+
+
+@sio.event
+async def voice_answer(sid: str, data: dict = None):
+    """Relays a WebRTC SDP answer from responder to caller."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    payload = data or {}
+    target_sid = payload.get("target_socket_id")
+    sdp = payload.get("sdp")
+
+    if not target_sid or not sdp:
+        return {"status": "ERROR", "message": "Missing target_socket_id or sdp"}
+
+    await sio.emit(
+        "voice_answer",
+        {
+            "sender_socket_id": sid,
+            "sender_participant_id": session.participant_id,
+            "sdp": sdp,
+        },
+        to=target_sid,
+    )
+    return {"status": "OK"}
+
+
+@sio.event
+async def voice_ice_candidate(sid: str, data: dict = None):
+    """Relays a WebRTC ICE candidate to target peer."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    payload = data or {}
+    target_sid = payload.get("target_socket_id")
+    candidate = payload.get("candidate")
+
+    if not target_sid or candidate is None:
+        return {"status": "ERROR", "message": "Missing target_socket_id or candidate"}
+
+    await sio.emit(
+        "voice_ice_candidate",
+        {
+            "sender_socket_id": sid,
+            "candidate": candidate,
+        },
+        to=target_sid,
+    )
+    return {"status": "OK"}
+
+
+@sio.event
+async def voice_mute_toggle(sid: str, data: dict = None):
+    """Broadcasts a participant's voice mute toggle state to room peers."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    is_muted = bool((data or {}).get("is_muted", False))
+    voice_manager.set_mute(session.room_code, session.participant_id, is_muted)
+
+    await sio.emit(
+        "voice_peer_mute_changed",
+        {
+            "participant_id": session.participant_id,
+            "username": session.username,
+            "is_muted": is_muted,
+        },
+        room=session.room_code,
+    )
+    return {"status": "OK", "is_muted": is_muted}
+
 
 
 

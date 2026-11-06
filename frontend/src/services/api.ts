@@ -1,4 +1,12 @@
-import { HealthInfo, Room, RoomAuth, Episode, QueueResponse } from '../types';
+import {
+  HealthInfo,
+  Room,
+  RoomAuth,
+  Episode,
+  QueueResponse,
+  ChatMessage,
+  MessageListResponse,
+} from '../types';
 
 const API_BASE = '/api';
 
@@ -107,6 +115,34 @@ export const api = {
         'X-Session-Token': auth.sessionToken,
       },
       body: JSON.stringify({ episode_id: episodeId }),
+    });
+  },
+
+  async getMessages(
+    code: string,
+    auth: { participantId: string; sessionToken: string },
+    limit: number = 100
+  ): Promise<MessageListResponse> {
+    return request<MessageListResponse>(`/rooms/${code.toUpperCase()}/messages?limit=${limit}`, {
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
+    });
+  },
+
+  async sendMessage(
+    code: string,
+    content: string,
+    auth: { participantId: string; sessionToken: string }
+  ): Promise<ChatMessage> {
+    return request<ChatMessage>(`/rooms/${code.toUpperCase()}/messages`, {
+      method: 'POST',
+      headers: {
+        'X-Participant-ID': auth.participantId,
+        'X-Session-Token': auth.sessionToken,
+      },
+      body: JSON.stringify({ content }),
     });
   },
 

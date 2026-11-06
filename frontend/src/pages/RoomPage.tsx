@@ -14,6 +14,10 @@ import {
   Plus,
   Upload,
   X,
+  MessageSquare,
+  Radio,
+  Mic,
+  MicOff,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
@@ -33,6 +37,10 @@ import { SyncHealthBadge } from '../components/video/SyncHealthBadge';
 import { useEpisodeQueue } from '../hooks/useEpisodeQueue';
 import { EpisodeQueue } from '../components/queue/EpisodeQueue';
 import { IntermissionOverlay } from '../components/queue/IntermissionOverlay';
+import { useChat } from '../hooks/useChat';
+import { useWebRTCVoice } from '../hooks/useWebRTCVoice';
+import { ChatPanel } from '../components/chat/ChatPanel';
+import { VoiceControlBar } from '../components/voice/VoiceControlBar';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -171,6 +179,60 @@ export const RoomPage: React.FC = () => {
       setLocalVideoFile(null);
     },
   });
+
+  // Phase 7: Real-time Text Chat Hook
+  const {
+    messages,
+    isLoading: isChatLoading,
+    sendMessage,
+  } = useChat({
+    socket,
+    auth,
+    roomCode: room?.code,
+  });
+
+  // Phase 7: WebRTC Voice Chat Hook
+  const {
+    isInVoice,
+    isMuted,
+    voiceMode,
+    isPttActive,
+    isSpeaking,
+    peerSpeakingMap,
+    voicePeers,
+    audioDevices,
+    selectedDeviceId,
+    setSelectedDeviceId,
+    peerVolume,
+    setPeerVolume,
+    isPeerMutedLocally,
+    setIsPeerMutedLocally,
+    permissionError,
+    clearPermissionError,
+    joinVoice,
+    leaveVoice,
+    toggleMute,
+    setVoiceMode,
+  } = useWebRTCVoice({
+    socket,
+    auth,
+    roomCode: room?.code,
+  });
+
+  // Phase 7: Sidebar Tabs & Unread Chat Badges
+  type SidebarTab = 'chat' | 'voice' | 'queue' | 'members';
+  const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
+  const [unreadMessages, setUnreadMessages] = useState<number>(0);
+  const prevMsgCountRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      setUnreadMessages(0);
+    } else if (messages.length > prevMsgCountRef.current) {
+      setUnreadMessages((prev) => prev + (messages.length - prevMsgCountRef.current));
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages.length, activeTab]);
 
   // Listen for socket events: episode added and verification result
   useEffect(() => {
@@ -356,6 +418,57 @@ export const RoomPage: React.FC = () => {
               </button>
             )}
           </div>
+
+          {/* Phase 7: Voice Quick Status / Control */}
+          {!isInVoice ? (
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<Radio className="w-3.5 h-3.5 text-emerald-400" />}
+              onClick={joinVoice}
+              className="text-xs h-8 text-emerald-300 border-emerald-800/80 hover:bg-emerald-950/40"
+            >
+              Join Voice
+            </Button>
+          ) : (
+            <div className="flex items-center gap-1.5 p-1 bg-void-900 border border-emerald-800/60 rounded-xl">
+              <button
+                onClick={() => setActiveTab('voice')}
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs font-mono text-emerald-300 hover:bg-emerald-950/50 transition-colors"
+                title="Voice connected — Click to open voice settings"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    isSpeaking ? 'bg-emerald-400 ring-2 ring-emerald-400/50 animate-pulse' : 'bg-emerald-400'
+                  }`}
+                />
+                <span>Voice ({voicePeers.length + 1})</span>
+              </button>
+              <button
+                onClick={toggleMute}
+                className={`p-1.5 rounded-lg text-xs transition-colors ${
+                  isMuted
+                    ? 'bg-rose-950/80 text-rose-300 border border-rose-800/80 hover:bg-rose-900/80'
+                    : 'bg-void-800 text-ink hover:text-white hover:bg-void-700'
+                }`}
+                title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              >
+                {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+              </button>
+              {voiceMode === 'ptt' && (
+                <span
+                  className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition-all ${
+                    isPttActive
+                      ? 'bg-violet-600 text-white font-bold animate-pulse'
+                      : 'bg-void-800 text-ink-muted'
+                  }`}
+                  title="Push-to-Talk active: Hold V to talk"
+                >
+                  {isPttActive ? 'PTT ON' : 'PTT [V]'}
+                </span>
+              )}
+            </div>
+          )}
 
           <Button
             variant="secondary"
@@ -567,104 +680,222 @@ export const RoomPage: React.FC = () => {
           )}
         </div>
 
-        {/* Sidebar: Episode Queue & Real-time Participants (1 Col) */}
-        <div className="space-y-6">
-          {/* Phase 6: Episode Queue Component */}
-          <EpisodeQueue
-            episodes={episodeList}
-            currentEpisodeId={effectiveCurrentEpisodeId || null}
-            isHost={!!auth?.is_host}
-            onSelectEpisode={handleSelectEpisode}
-            onRemoveEpisode={handleRemoveEpisode}
-            onReorderQueue={handleReorderQueue}
-            onOpenUploadModal={() => setShowUploadModal(true)}
-            onDownloadEpisode={(ep) => {
-              if (auth) {
-                window.open(api.getDownloadUrl(ep.id, auth.participant_id, auth.session_token), '_blank');
-              }
-            }}
-            verifiedEpisodeId={currentParticipant?.status === 'VERIFIED' ? currentEpisode?.id : null}
-          />
+        {/* Sidebar: Chat, Voice, Episode Queue & Participants (1 Col) */}
+        <div className="space-y-4">
+          {/* Sidebar Tabs Switcher */}
+          <div className="flex items-center p-1 bg-void-900 border border-void-700/80 rounded-xl gap-1">
+            <button
+              onClick={() => {
+                setActiveTab('chat');
+                setUnreadMessages(0);
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'chat'
+                  ? 'bg-violet-600 text-white shadow-sm'
+                  : 'text-ink-muted hover:text-white hover:bg-void-800'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Chat</span>
+              {unreadMessages > 0 && (
+                <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+              )}
+            </button>
 
-          <Card variant="default">
-            <div className="flex items-center justify-between pb-3 border-b border-void-700/60 mb-4">
-              <div className="flex items-center gap-2">
-                <Users className="w-4 h-4 text-violet-400" />
-                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Participants ({activeParticipants.length})
-                </h3>
-              </div>
-              <span className="text-[11px] font-mono text-ink-dim">
-                {activeParticipants.filter((p) => p.is_online).length} Online
+            <button
+              onClick={() => setActiveTab('voice')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'voice'
+                  ? 'bg-violet-600 text-white shadow-sm'
+                  : 'text-ink-muted hover:text-white hover:bg-void-800'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5" />
+              <span>Voice</span>
+              {isInVoice && (
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    isSpeaking || Object.values(peerSpeakingMap).some(Boolean)
+                      ? 'bg-emerald-400 ring-2 ring-emerald-400/50 animate-pulse'
+                      : 'bg-emerald-400'
+                  }`}
+                />
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('queue')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'queue'
+                  ? 'bg-violet-600 text-white shadow-sm'
+                  : 'text-ink-muted hover:text-white hover:bg-void-800'
+              }`}
+            >
+              <Film className="w-3.5 h-3.5" />
+              <span>Queue</span>
+              {episodeList.length > 0 && (
+                <span className="text-[10px] font-mono px-1 rounded bg-void-800/80 text-ink-dim">
+                  {episodeList.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('members')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-all ${
+                activeTab === 'members'
+                  ? 'bg-violet-600 text-white shadow-sm'
+                  : 'text-ink-muted hover:text-white hover:bg-void-800'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Members</span>
+              <span className="text-[10px] font-mono px-1 rounded bg-void-800/80 text-ink-dim">
+                {activeParticipants.length}
               </span>
-            </div>
+            </button>
+          </div>
 
-            <div className="space-y-3">
-              {activeParticipants.map((p) => (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60 transition-all duration-200"
-                >
-                  <div className="flex items-center gap-3">
-                    {/* Avatar with Online Pulse Indicator */}
-                    <div className="relative">
-                      <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white shadow-sm">
-                        {p.username.charAt(0).toUpperCase()}
-                      </div>
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-void-900 ${
-                          p.is_online ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-void-600'
-                        }`}
-                        title={p.is_online ? 'Online' : 'Offline'}
-                      />
-                    </div>
+          {/* Tab 1: Real-time Text Chat */}
+          {activeTab === 'chat' && (
+            <ChatPanel
+              messages={messages}
+              onSendMessage={sendMessage}
+              currentParticipantId={auth?.participant_id}
+              hostParticipantId={room.host_id}
+              isLoading={isChatLoading}
+            />
+          )}
 
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm font-medium text-white">{p.username}</span>
-                        {p.is_host && (
-                          <span className="text-[9px] font-mono uppercase bg-violet-950 text-violet-400 px-1.5 py-0.2 rounded border border-violet-800">
-                            Host
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-ink-dim font-mono">
-                          {p.id === auth?.participant_id ? '(You)' : 'Peer'}
-                        </span>
-                        <span className="text-void-600">•</span>
-                        <span
-                          className={`text-[10px] font-mono ${
-                            p.is_online ? 'text-emerald-400 font-semibold' : 'text-ink-dim'
-                          }`}
-                        >
-                          {p.is_online ? (
-                            p.active_connections > 1 ? `Online (${p.active_connections} tabs)` : 'Online'
-                          ) : 'Offline'}
-                        </span>
-                      </div>
-                    </div>
+          {/* Tab 2: WebRTC Voice Controls */}
+          {activeTab === 'voice' && (
+            <VoiceControlBar
+              isInVoice={isInVoice}
+              isMuted={isMuted}
+              voiceMode={voiceMode}
+              isPttActive={isPttActive}
+              isSpeaking={isSpeaking}
+              peerSpeakingMap={peerSpeakingMap}
+              voicePeers={voicePeers}
+              audioDevices={audioDevices}
+              selectedDeviceId={selectedDeviceId}
+              onDeviceChange={setSelectedDeviceId}
+              peerVolume={peerVolume}
+              onPeerVolumeChange={setPeerVolume}
+              isPeerMutedLocally={isPeerMutedLocally}
+              onTogglePeerMuteLocally={() => setIsPeerMutedLocally(!isPeerMutedLocally)}
+              permissionError={permissionError}
+              onClearPermissionError={clearPermissionError}
+              onJoinVoice={joinVoice}
+              onLeaveVoice={leaveVoice}
+              onToggleMute={toggleMute}
+              onSetVoiceMode={setVoiceMode}
+            />
+          )}
+
+          {/* Tab 3: Episode Queue */}
+          {activeTab === 'queue' && (
+            <EpisodeQueue
+              episodes={episodeList}
+              currentEpisodeId={effectiveCurrentEpisodeId || null}
+              isHost={!!auth?.is_host}
+              onSelectEpisode={handleSelectEpisode}
+              onRemoveEpisode={handleRemoveEpisode}
+              onReorderQueue={handleReorderQueue}
+              onOpenUploadModal={() => setShowUploadModal(true)}
+              onDownloadEpisode={(ep) => {
+                if (auth) {
+                  window.open(api.getDownloadUrl(ep.id, auth.participant_id, auth.session_token), '_blank');
+                }
+              }}
+              verifiedEpisodeId={currentParticipant?.status === 'VERIFIED' ? currentEpisode?.id : null}
+            />
+          )}
+
+          {/* Tab 4: Members & How-To */}
+          {activeTab === 'members' && (
+            <>
+              <Card variant="default">
+                <div className="flex items-center justify-between pb-3 border-b border-void-700/60 mb-4">
+                  <div className="flex items-center gap-2">
+                    <Users className="w-4 h-4 text-violet-400" />
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                      Participants ({activeParticipants.length})
+                    </h3>
                   </div>
-
-                  <Badge status={p.status} size="sm" />
+                  <span className="text-[11px] font-mono text-ink-dim">
+                    {activeParticipants.filter((p) => p.is_online).length} Online
+                  </span>
                 </div>
-              ))}
-            </div>
-          </Card>
 
-          {/* Watch Party How-to Guide */}
-          <Card variant="outline" className="text-xs text-ink-muted space-y-2">
-            <div className="font-semibold text-white flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-cyan-400" />
-              <span>How AnimeSync Works:</span>
-            </div>
-            <ol className="list-decimal list-inside space-y-1.5 text-ink-dim text-[11px] leading-relaxed">
-              <li>Host uploads or queues an anime episode.</li>
-              <li>Friend downloads the episode to their computer.</li>
-              <li>Both participants select their local file to verify SHA-256.</li>
-              <li>Once verified, click Ready for synchronized playback!</li>
-            </ol>
-          </Card>
+                <div className="space-y-3">
+                  {activeParticipants.map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60 transition-all duration-200"
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* Avatar with Online Pulse Indicator */}
+                        <div className="relative">
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white shadow-sm">
+                            {p.username.charAt(0).toUpperCase()}
+                          </div>
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-void-900 ${
+                              p.is_online ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-void-600'
+                            }`}
+                            title={p.is_online ? 'Online' : 'Offline'}
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-medium text-white">{p.username}</span>
+                            {p.is_host && (
+                              <span className="text-[9px] font-mono uppercase bg-violet-950 text-violet-400 px-1.5 py-0.2 rounded border border-violet-800">
+                                Host
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-ink-dim font-mono">
+                              {p.id === auth?.participant_id ? '(You)' : 'Peer'}
+                            </span>
+                            <span className="text-void-600">•</span>
+                            <span
+                              className={`text-[10px] font-mono ${
+                                p.is_online ? 'text-emerald-400 font-semibold' : 'text-ink-dim'
+                              }`}
+                            >
+                              {p.is_online ? (
+                                p.active_connections > 1 ? `Online (${p.active_connections} tabs)` : 'Online'
+                              ) : 'Offline'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Badge status={p.status} size="sm" />
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              {/* Watch Party How-to Guide */}
+              <Card variant="outline" className="text-xs text-ink-muted space-y-2">
+                <div className="font-semibold text-white flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-cyan-400" />
+                  <span>How AnimeSync Works:</span>
+                </div>
+                <ol className="list-decimal list-inside space-y-1.5 text-ink-dim text-[11px] leading-relaxed">
+                  <li>Host uploads or queues an anime episode.</li>
+                  <li>Friend downloads the episode to their computer.</li>
+                  <li>Both participants select their local file to verify SHA-256.</li>
+                  <li>Once verified, click Ready for synchronized playback!</li>
+                </ol>
+              </Card>
+            </>
+          )}
         </div>
       </div>
 
