@@ -6,6 +6,9 @@ import {
   QueueResponse,
   ChatMessage,
   MessageListResponse,
+  MediaStorageResponse,
+  MediaDeleteResponse,
+  MediaPurgeResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -251,6 +254,52 @@ export const api = {
       headers: {
         'X-Participant-ID': auth.participantId,
         'X-Session-Token': auth.sessionToken,
+      },
+    });
+  },
+
+  // Phase 8 Task 8.6: Media Management Dashboard API methods
+  async getMediaDashboard(
+    roomCode: string,
+    auth: { participantId?: string; participant_id?: string; sessionToken?: string; session_token?: string }
+  ): Promise<MediaStorageResponse> {
+    const pid = auth.participant_id || auth.participantId || '';
+    const token = auth.session_token || auth.sessionToken || '';
+    return request<MediaStorageResponse>(`/rooms/${roomCode.toUpperCase()}/media`, {
+      headers: {
+        'X-Participant-ID': pid,
+        'X-Session-Token': token,
+      },
+    });
+  },
+
+  async deleteMediaFile(
+    roomCode: string,
+    episodeId: string,
+    auth: { participantId?: string; participant_id?: string; sessionToken?: string; session_token?: string }
+  ): Promise<MediaDeleteResponse> {
+    const pid = auth.participant_id || auth.participantId || '';
+    const token = auth.session_token || auth.sessionToken || '';
+    return request<MediaDeleteResponse>(`/rooms/${roomCode.toUpperCase()}/media/${episodeId}`, {
+      method: 'DELETE',
+      headers: {
+        'X-Participant-ID': pid,
+        'X-Session-Token': token,
+      },
+    });
+  },
+
+  async purgeTempMedia(
+    roomCode: string,
+    auth: { participantId?: string; participant_id?: string; sessionToken?: string; session_token?: string }
+  ): Promise<MediaPurgeResponse> {
+    const pid = auth.participant_id || auth.participantId || '';
+    const token = auth.session_token || auth.sessionToken || '';
+    return request<MediaPurgeResponse>(`/rooms/${roomCode.toUpperCase()}/media/purge`, {
+      method: 'POST',
+      headers: {
+        'X-Participant-ID': pid,
+        'X-Session-Token': token,
       },
     });
   },

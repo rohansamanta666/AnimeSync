@@ -26,6 +26,7 @@ const SHORTCUTS: ShortcutItem[] = [
   { keys: ['M'], description: 'Mute / unmute anime soundtrack', category: 'playback' },
   { keys: ['F'], description: 'Toggle Fullscreen mode', category: 'playback' },
   { keys: ['T'], description: 'Toggle Theater Mode (full-width stage)', category: 'playback' },
+  { keys: ['S'], description: 'Toggle Subtitles on / off', category: 'playback' },
   { keys: ['Shift', 'R'], description: 'Manual Resync with authoritative server time', category: 'playback' },
 
   // Communication

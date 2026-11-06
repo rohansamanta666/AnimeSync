@@ -180,3 +180,49 @@ export interface HealthInfo {
   environment: string;
   storage: StorageInfo;
 }
+
+// Phase 8 Task 8.6: Media Management Types
+export interface StorageUsage {
+  total_disk_bytes: number;
+  free_disk_bytes: number;
+  animesync_used_bytes: number;
+  video_storage_bytes: number;
+  temp_storage_bytes: number;
+}
+
+export interface MediaEpisode {
+  id: string;
+  anime_title: string;
+  season: number;
+  episode_number: number;
+  display_title?: string | null;
+  filename: string;
+  file_size_bytes: number;
+  sha256_hash?: string | null;
+  duration_seconds?: number | null;
+  upload_status: string;
+  queue_position: number;
+  created_at?: string | null;
+  is_active: boolean;
+  file_exists_on_disk: boolean;
+}
+
+export interface MediaStorageResponse {
+  room_code: string;
+  storage: StorageUsage;
+  episodes: MediaEpisode[];
+}
+
+export interface MediaDeleteResponse {
+  success: boolean;
+  message: string;
+  freed_bytes: number;
+  remaining_episodes_count: number;
+}
+
+export interface MediaPurgeResponse {
+  success: boolean;
+  message: string;
+  freed_bytes: number;
+  purged_count: number;
+}

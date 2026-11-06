@@ -96,8 +96,8 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 - [x] Task 8.2: Participant profile popover with individual voice volume slider and mute controls.
 - [x] Task 8.3: Fullscreen mode: automatically hide sidebar, chat, and queue, with cursor inactivity autohide.
 - [x] Task 8.4: Keyboard shortcuts: Space (play/pause), Left/Right (seek $\pm 5$s), F (fullscreen), M (mute anime), V (PTT).
-- [ ] Task 8.5: External subtitle support: `.srt` and `.vtt` file parser with customizable font size, color, and background.
-- [ ] Task 8.6: Media Management Dashboard: view disk usage, inspect stored videos, and manually delete files with confirmation.
+- [x] Task 8.5: External subtitle support: `.srt` and `.vtt` file parser with customizable font size, color, and background.
+- [x] Task 8.6: Media Management Dashboard: view disk usage, inspect stored videos, and manually delete files with confirmation.
 
 ---
 

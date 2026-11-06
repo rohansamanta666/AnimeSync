@@ -39,12 +39,24 @@ import {
   Tv,
   MessageSquare,
   X,
+  Captions,
+  CaptionsOff,
+  Upload,
+  Trash2,
+  Check,
 } from 'lucide-react';
 import { Button } from '../common/Button';
 import { SyncHealthBadge } from './SyncHealthBadge';
 import { SyncStatusState } from '../../services/drift';
 import { isTypingElement } from '../../services/webrtc';
 import { formatTime } from '../../services/playerUtils';
+import {
+  SubtitleCue,
+  SubtitleSettings,
+  DEFAULT_SUBTITLE_SETTINGS,
+  parseSubtitles,
+  findActiveCues,
+} from '../../services/subtitles';
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -151,6 +163,52 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [showFullscreenDrawer, setShowFullscreenDrawer] = useState(false);
     const [actionIndicator, setActionIndicator] = useState<'play' | 'pause' | null>(null);
 
+    // Phase 8 Task 8.5: External Subtitles State
+    const subtitleInputRef = useRef<HTMLInputElement | null>(null);
+    const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
+    const [subtitleFilename, setSubtitleFilename] = useState<string | null>(null);
+    const [subtitleSettings, setSubtitleSettings] = useState<SubtitleSettings>(DEFAULT_SUBTITLE_SETTINGS);
+    const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
+    const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null);
+
+    // Subtitle file selection handler
+    const handleSubtitleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const selected = e.target.files?.[0];
+      if (!selected) return;
+
+      try {
+        const text = await selected.text();
+        const cues = parseSubtitles(text, selected.name);
+        if (cues.length === 0) {
+          setSubtitleNotice('No valid subtitle cues found. Check format (.srt / .vtt).');
+          setTimeout(() => setSubtitleNotice(null), 4000);
+          return;
+        }
+        setSubtitleCues(cues);
+        setSubtitleFilename(selected.name);
+        setSubtitleSettings((prev) => ({ ...prev, enabled: true }));
+        setSubtitleNotice(`Loaded ${cues.length} cues from ${selected.name}`);
+        setTimeout(() => setSubtitleNotice(null), 3000);
+      } catch (err) {
+        console.warn('Failed to parse subtitle file:', err);
+        setSubtitleNotice('Failed to read subtitle file.');
+        setTimeout(() => setSubtitleNotice(null), 4000);
+      } finally {
+        if (subtitleInputRef.current) {
+          subtitleInputRef.current.value = '';
+        }
+      }
+    };
+
+    const handleClearSubtitles = () => {
+      setSubtitleCues([]);
+      setSubtitleFilename(null);
+      setSubtitleNotice(null);
+    };
+
+    // Active subtitle cues lookup
+    const activeCues = subtitleSettings.enabled ? findActiveCues(subtitleCues, currentTime) : [];
+
     // 1. Create and revoke object URL safely
     useEffect(() => {
       if (!file) {
@@ -191,16 +249,17 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
       }
-      if (isPlaying && !showFullscreenDrawer) {
+      if (isPlaying && !showFullscreenDrawer && !showSubtitleMenu) {
         hideTimeoutRef.current = setTimeout(() => {
           setControlsVisible(false);
           setShowSpeedMenu(false);
+          setShowSubtitleMenu(false);
         }, 2500);
       }
-    }, [isPlaying, showFullscreenDrawer]);
+    }, [isPlaying, showFullscreenDrawer, showSubtitleMenu]);
 
     useEffect(() => {
-      if (!isPlaying || showFullscreenDrawer) {
+      if (!isPlaying || showFullscreenDrawer || showSubtitleMenu) {
         setControlsVisible(true);
         if (hideTimeoutRef.current) {
           clearTimeout(hideTimeoutRef.current);
@@ -213,7 +272,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           clearTimeout(hideTimeoutRef.current);
         }
       };
-    }, [isPlaying, showFullscreenDrawer, resetHideTimer]);
+    }, [isPlaying, showFullscreenDrawer, showSubtitleMenu, resetHideTimer]);
 
     // 4. Imperative handle for Phase 5 sync engine
     useImperativeHandle(
@@ -397,10 +456,20 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               setShowFullscreenDrawer((prev) => !prev);
             }
             break;
+          case 'KeyS':
+            if (subtitleCues.length > 0) {
+              e.preventDefault();
+              setSubtitleSettings((prev) => ({ ...prev, enabled: !prev.enabled }));
+            }
+            break;
           case 'Escape':
             if (showFullscreenDrawer) {
               e.preventDefault();
               setShowFullscreenDrawer(false);
+            }
+            if (showSubtitleMenu) {
+              e.preventDefault();
+              setShowSubtitleMenu(false);
             }
             break;
           case 'KeyR':
@@ -422,6 +491,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         onToggleTheaterMode,
         fullscreenOverlay,
         showFullscreenDrawer,
+        showSubtitleMenu,
+        subtitleCues.length,
       ]
     );
 
@@ -636,6 +707,51 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           </div>
         )}
 
+        {/* Phase 8 Task 8.5: External Subtitle Overlay */}
+        {activeCues.length > 0 && (
+          <div
+            className={`absolute inset-x-0 flex flex-col items-center justify-end pointer-events-none z-15 transition-all duration-200 px-6 ${
+              controlsVisible ? 'bottom-20' : 'bottom-8'
+            }`}
+          >
+            {activeCues.map((cue) => (
+              <div
+                key={cue.id}
+                className="my-0.5 px-3 py-1 rounded-md text-center max-w-4xl transition-all duration-100 inline-block font-sans select-none"
+                style={{
+                  fontSize: `${isFullscreen ? subtitleSettings.fontSize * 1.3 : subtitleSettings.fontSize}px`,
+                  color: subtitleSettings.textColor,
+                  backgroundColor: subtitleSettings.backgroundColor,
+                  textShadow: subtitleSettings.textShadow
+                    ? '0 2px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)'
+                    : 'none',
+                  lineHeight: 1.35,
+                  fontWeight: 600,
+                  whiteSpace: 'pre-line',
+                }}
+              >
+                {cue.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Subtitle Notice Toast */}
+        {subtitleNotice && (
+          <div className="absolute top-14 left-1/2 transform -translate-x-1/2 z-30 px-3.5 py-1.5 rounded-xl bg-void-950/95 border border-violet-500/50 text-violet-200 text-xs shadow-2xl backdrop-blur-md pointer-events-none animate-in fade-in duration-200 font-mono">
+            {subtitleNotice}
+          </div>
+        )}
+
+        {/* Hidden Subtitle File Input */}
+        <input
+          ref={subtitleInputRef}
+          type="file"
+          accept=".srt,.vtt,text/vtt,application/x-subrip"
+          className="hidden"
+          onChange={handleSubtitleFileSelect}
+        />
+
         {/* Top Header Overlay Bar (Auto-hides) */}
         <div
           className={`absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 via-black/40 to-transparent flex items-center justify-between transition-opacity duration-300 z-10 ${
@@ -805,7 +921,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
               {/* Speed Selector */}
               <div className="relative">
                 <button
-                  onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                  onClick={() => {
+                    setShowSpeedMenu(!showSpeedMenu);
+                    setShowSubtitleMenu(false);
+                  }}
                   className="px-2 py-1 rounded-lg hover:bg-white/10 text-xs font-mono font-medium text-white transition-colors flex items-center gap-1"
                   title="Playback Speed"
                 >
@@ -828,6 +947,223 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                         {rate}x
                       </button>
                     ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Phase 8 Task 8.5: Subtitles Button & Customization Popover */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setShowSubtitleMenu(!showSubtitleMenu);
+                    setShowSpeedMenu(false);
+                  }}
+                  className={`px-2 py-1 rounded-lg hover:bg-white/10 text-xs font-mono font-medium transition-colors flex items-center gap-1 ${
+                    subtitleCues.length > 0 && subtitleSettings.enabled
+                      ? 'text-pink-400 bg-pink-950/40 border border-pink-800/60'
+                      : 'text-white'
+                  }`}
+                  title={
+                    subtitleCues.length > 0
+                      ? `Subtitles ${subtitleSettings.enabled ? 'ON' : 'OFF'} (Press S)`
+                      : 'Load Subtitles (.srt, .vtt)'
+                  }
+                >
+                  {subtitleCues.length > 0 && subtitleSettings.enabled ? (
+                    <Captions className="w-3.5 h-3.5 text-pink-400" />
+                  ) : (
+                    <CaptionsOff className="w-3.5 h-3.5 text-ink-muted" />
+                  )}
+                  <span className="hidden sm:inline">CC</span>
+                </button>
+
+                {/* Subtitle Popover Menu */}
+                {showSubtitleMenu && (
+                  <div
+                    className="absolute bottom-8 right-0 bg-void-950/95 backdrop-blur-md border border-void-700/80 rounded-2xl p-4 shadow-2xl flex flex-col gap-3.5 z-30 w-72 text-white animate-in zoom-in-95 duration-150"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between pb-2 border-b border-void-800">
+                      <div className="flex items-center gap-2">
+                        <Captions className="w-4 h-4 text-pink-400" />
+                        <span className="font-bold text-xs uppercase tracking-wider">Subtitles (CC)</span>
+                      </div>
+                      {subtitleCues.length > 0 && (
+                        <button
+                          onClick={() =>
+                            setSubtitleSettings((prev) => ({ ...prev, enabled: !prev.enabled }))
+                          }
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-md font-bold transition-colors ${
+                            subtitleSettings.enabled
+                              ? 'bg-pink-600 text-white'
+                              : 'bg-void-800 text-ink-muted hover:text-white'
+                          }`}
+                        >
+                          {subtitleSettings.enabled ? 'ENABLED' : 'DISABLED'}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* File Loading / Status */}
+                    {subtitleFilename ? (
+                      <div className="p-2.5 rounded-xl bg-void-900 border border-void-800 flex items-center justify-between">
+                        <div className="min-w-0 pr-2">
+                          <p className="text-xs font-mono text-white truncate">{subtitleFilename}</p>
+                          <p className="text-[10px] font-mono text-ink-muted">
+                            {subtitleCues.length} cues loaded
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => subtitleInputRef.current?.click()}
+                            className="p-1 rounded-lg hover:bg-void-700 text-ink-muted hover:text-white"
+                            title="Replace subtitle file"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={handleClearSubtitles}
+                            className="p-1 rounded-lg hover:bg-rose-950/60 text-ink-muted hover:text-rose-400"
+                            title="Remove subtitles"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-2">
+                        <p className="text-xs text-ink-muted mb-2.5">
+                          No subtitles loaded. Select a local <span className="font-mono text-pink-300">.srt</span> or <span className="font-mono text-pink-300">.vtt</span> file.
+                        </p>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="w-full text-xs"
+                          leftIcon={<Upload className="w-3.5 h-3.5 text-pink-400" />}
+                          onClick={() => subtitleInputRef.current?.click()}
+                        >
+                          Load Subtitle File
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Subtitle Customization Settings (if loaded) */}
+                    {subtitleCues.length > 0 && (
+                      <div className="space-y-3 pt-1 border-t border-void-800/80">
+                        {/* Font Size */}
+                        <div>
+                          <label className="text-[10px] font-mono text-ink-muted uppercase block mb-1.5">
+                            Font Size
+                          </label>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {[
+                              { label: 'S', size: 18 },
+                              { label: 'M', size: 22 },
+                              { label: 'L', size: 26 },
+                              { label: 'XL', size: 32 },
+                            ].map(({ label, size }) => (
+                              <button
+                                key={size}
+                                onClick={() =>
+                                  setSubtitleSettings((prev) => ({ ...prev, fontSize: size }))
+                                }
+                                className={`py-1 rounded-lg text-xs font-mono transition-colors ${
+                                  subtitleSettings.fontSize === size
+                                    ? 'bg-pink-600 text-white font-bold'
+                                    : 'bg-void-900 text-ink-muted hover:text-white hover:bg-void-800'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Font Color */}
+                        <div>
+                          <label className="text-[10px] font-mono text-ink-muted uppercase block mb-1.5">
+                            Text Color
+                          </label>
+                          <div className="flex items-center gap-2">
+                            {[
+                              { name: 'White', color: '#FFFFFF' },
+                              { name: 'Yellow', color: '#FFE600' },
+                              { name: 'Cyan', color: '#00F5FF' },
+                              { name: 'Green', color: '#4EFA90' },
+                            ].map(({ name, color }) => (
+                              <button
+                                key={color}
+                                onClick={() =>
+                                  setSubtitleSettings((prev) => ({ ...prev, textColor: color }))
+                                }
+                                className={`flex-1 h-6 rounded-md border flex items-center justify-center transition-all ${
+                                  subtitleSettings.textColor === color
+                                    ? 'border-white scale-105 shadow-md'
+                                    : 'border-void-700 opacity-60 hover:opacity-100'
+                                }`}
+                                style={{ backgroundColor: color }}
+                                title={name}
+                              >
+                                {subtitleSettings.textColor === color && (
+                                  <Check className="w-3.5 h-3.5 text-black stroke-[3]" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Background Opacity */}
+                        <div>
+                          <label className="text-[10px] font-mono text-ink-muted uppercase block mb-1.5">
+                            Background
+                          </label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[
+                              { label: 'None', bg: 'transparent' },
+                              { label: 'Medium', bg: 'rgba(0, 0, 0, 0.65)' },
+                              { label: 'Solid', bg: 'rgba(0, 0, 0, 0.95)' },
+                            ].map(({ label, bg }) => (
+                              <button
+                                key={bg}
+                                onClick={() =>
+                                  setSubtitleSettings((prev) => ({ ...prev, backgroundColor: bg }))
+                                }
+                                className={`py-1 rounded-lg text-xs font-mono transition-colors ${
+                                  subtitleSettings.backgroundColor === bg
+                                    ? 'bg-pink-600 text-white font-bold'
+                                    : 'bg-void-900 text-ink-muted hover:text-white hover:bg-void-800'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Text Shadow */}
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[10px] font-mono text-ink-muted uppercase">
+                            Text Shadow
+                          </span>
+                          <button
+                            onClick={() =>
+                              setSubtitleSettings((prev) => ({
+                                ...prev,
+                                textShadow: !prev.textShadow,
+                              }))
+                            }
+                            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-colors ${
+                              subtitleSettings.textShadow
+                                ? 'bg-pink-600 text-white'
+                                : 'bg-void-800 text-ink-muted'
+                            }`}
+                          >
+                            {subtitleSettings.textShadow ? 'ON' : 'OFF'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

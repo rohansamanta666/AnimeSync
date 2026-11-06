@@ -68,3 +68,49 @@ class QueueReorderRequest(BaseModel):
 
 class QueueSelectRequest(BaseModel):
     episode_id: str
+
+# ---------------------------------------------------------------------------
+# Phase 8 Task 8.6: Media Management Dashboard Schemas
+# ---------------------------------------------------------------------------
+
+class StorageUsageSchema(BaseModel):
+    total_disk_bytes: int
+    free_disk_bytes: int
+    animesync_used_bytes: int
+    video_storage_bytes: int
+    temp_storage_bytes: int
+
+class MediaEpisodeSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    anime_title: str
+    season: int
+    episode_number: int
+    display_title: Optional[str] = None
+    filename: str
+    file_size_bytes: int
+    sha256_hash: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    upload_status: str
+    queue_position: int
+    created_at: Optional[datetime] = None
+    is_active: bool
+    file_exists_on_disk: bool
+
+class MediaStorageResponse(BaseModel):
+    room_code: str
+    storage: StorageUsageSchema
+    episodes: List[MediaEpisodeSchema]
+
+class MediaDeleteResponse(BaseModel):
+    success: bool
+    message: str
+    freed_bytes: int
+    remaining_episodes_count: int
+
+class MediaPurgeResponse(BaseModel):
+    success: bool
+    message: str
+    freed_bytes: int
+    purged_count: int

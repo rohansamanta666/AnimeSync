@@ -1,4 +1,5 @@
 from typing import Optional
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.database import get_db
@@ -6,6 +7,7 @@ from backend.app.models.participant import Participant
 from backend.app.services.room_manager import RoomManager
 from backend.app.services.queue_manager import QueueManager
 from backend.app.services.chat_service import ChatService
+from backend.app.services.storage import StorageService
 from backend.app.schemas.room import (
     RoomCreateRequest,
     RoomJoinRequest,
@@ -16,6 +18,11 @@ from backend.app.schemas.room import (
     QueueResponse,
     QueueReorderRequest,
     QueueSelectRequest,
+    StorageUsageSchema,
+    MediaEpisodeSchema,
+    MediaStorageResponse,
+    MediaDeleteResponse,
+    MediaPurgeResponse,
 )
 from backend.app.schemas.message import (
     MessageCreate,
@@ -285,5 +292,138 @@ async def send_room_message(
     await sio.emit("new_message", {"message": msg_dict}, room=room.code)
 
     return MessageResponse.model_validate(msg)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: Media Management Dashboard Endpoints (Task 8.6)
+# ---------------------------------------------------------------------------
+
+@router.get("/{code}/media", response_model=MediaStorageResponse)
+async def get_media_dashboard(
+    code: str,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Phase 8 Task 8.6: Returns host storage usage and episode files status for the room.
+    """
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    await _authenticate_participant(db, room.id, participant_id, session_token)
+
+    storage_stats = StorageService.get_storage_usage()
+    episodes = await QueueManager.get_queue(db, room.id)
+
+    media_episodes = []
+    for ep in episodes:
+        path = Path(ep.file_path) if ep.file_path else None
+        exists = path is not None and path.exists() and path.is_file()
+        media_episodes.append(
+            MediaEpisodeSchema(
+                id=ep.id,
+                anime_title=ep.anime_title,
+                season=ep.season,
+                episode_number=ep.episode_number,
+                display_title=ep.display_title,
+                filename=ep.filename,
+                file_size_bytes=ep.file_size_bytes,
+                sha256_hash=ep.sha256_hash,
+                duration_seconds=ep.duration_seconds,
+                upload_status=ep.upload_status.value if hasattr(ep.upload_status, "value") else str(ep.upload_status),
+                queue_position=ep.queue_position,
+                created_at=ep.created_at,
+                is_active=(room.current_episode_id == ep.id),
+                file_exists_on_disk=exists,
+            )
+        )
+
+    return MediaStorageResponse(
+        room_code=room.code,
+        storage=StorageUsageSchema(**storage_stats),
+        episodes=media_episodes,
+    )
+
+
+@router.delete("/{code}/media/{episode_id}", response_model=MediaDeleteResponse)
+async def delete_media_file(
+    code: str,
+    episode_id: str,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Phase 8 Task 8.6: Permanently deletes an episode file from host disk and queue (host only).
+    """
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    await _authenticate_participant(db, room.id, participant_id, session_token, require_host=True)
+
+    target_ep = await QueueManager.get_episode_by_id(db, episode_id)
+    if not target_ep or target_ep.room_id != room.id:
+        raise HTTPException(status_code=404, detail="Episode not found in room")
+
+    path = Path(target_ep.file_path) if target_ep.file_path else None
+    freed_bytes = path.stat().st_size if path and path.exists() else target_ep.file_size_bytes
+
+    previous_current_id = room.current_episode_id
+    success, new_current_id, remaining = await QueueManager.remove_from_queue(db, room.id, episode_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to remove episode from storage")
+
+    # Broadcast updated queue to all room clients
+    queue_dicts = [QueueManager.serialize_episode(ep) for ep in remaining]
+    await sio.emit(
+        "queue_updated",
+        {
+            "room_code": room.code,
+            "episodes": queue_dicts,
+            "current_episode_id": new_current_id,
+        },
+        room=room.code,
+    )
+
+    if previous_current_id == episode_id:
+        await invalidate_room_readiness(
+            room.code, reason="Active episode was deleted by host", reset_watching=True
+        )
+
+    return MediaDeleteResponse(
+        success=True,
+        message=f"Deleted '{target_ep.filename}' successfully",
+        freed_bytes=freed_bytes,
+        remaining_episodes_count=len(remaining),
+    )
+
+
+@router.post("/{code}/media/purge", response_model=MediaPurgeResponse)
+async def purge_temp_media(
+    code: str,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Phase 8 Task 8.6: Purges temporary upload chunks and orphaned files (host only).
+    """
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    await _authenticate_participant(db, room.id, participant_id, session_token, require_host=True)
+
+    purge_result = StorageService.purge_temp_storage(max_age_seconds=0)
+
+    return MediaPurgeResponse(
+        success=True,
+        message=f"Purged {purge_result['purged_count']} temporary session(s)",
+        freed_bytes=purge_result["freed_bytes"],
+        purged_count=purge_result["purged_count"],
+    )
 
 

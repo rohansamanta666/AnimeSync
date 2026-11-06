@@ -1,8 +1,8 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 8 (Watch-Room Polish & UI/UX Experience) — **IN PROGRESS (Tasks 8.1–8.4 Completed, Tasks 8.5–8.6 Pending)**
-- **Next Task**: **Phase 8 — Task 8.5: External Subtitle Support (.srt / .vtt Parser & Rendering)**
+- **Current Phase**: Phase 8 (Watch-Room Polish & UI/UX Experience) — **COMPLETED (100%)**
+- **Next Task**: **Phase 9 — Task 9.1: Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios**
 - **Git Branch**: `main`
 - **Latest Commit**: `ea3b734` (`feat(phase-8): implement watch-room polish part 1 (tasks 8.1-8.4)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
@@ -22,7 +22,7 @@
 | **Phase 5** | Synchronized Video Player | **COMPLETED** | 100% |
 | **Phase 6** | Episode Queue & Auto-Next | **COMPLETED** | 100% |
 | **Phase 7** | Text Chat & WebRTC Voice | **COMPLETED** | 100% |
-| **Phase 8** | Watch-Room Polish & Customization | **In Progress** | 50% |
+| **Phase 8** | Watch-Room Polish & Customization | **COMPLETED** | 100% |
 | **Phase 9** | Testing, Security & Free Deployment | Pending | 0% |
 
 ---
@@ -222,7 +222,7 @@
   - Independent peer volume slider (0% to 200%) mapping volume percent directly to Web Audio `GainNode.gain.value` (0.0 to 2.0).
   - Local peer mute toggle: allows muting the remote peer locally in headphones without disabling their microphone or affecting the anime soundtrack.
 
-### Phase 8: Watch-Room Polish & UI/UX Experience (Tasks 8.1–8.4 Completed)
+### Phase 8: Watch-Room Polish & UI/UX Experience (100% Completed)
 - [x] **Task 8.1: Discord-Inspired Collapsible Watch-Room Sidebar (`RoomPage.tsx`)**:
   - Implemented collapsible communication & playlist sidebar with smooth 300ms CSS transitions.
   - Header toggle button with dynamic icons (`PanelRightClose` / `PanelRightOpen`) and tooltips.
@@ -242,24 +242,47 @@
   - Theater Mode: `Tv` button in bottom controls bar and `T` keyboard shortcut expands the player stage to 98vw cinematic width.
 - [x] **Task 8.4: Keyboard Shortcuts & Cheat Sheet Modal (`KeyboardShortcutsModal.tsx`, `playerUtils.ts`, `VideoPlayer.tsx`, `RoomPage.tsx`)**:
   - Standardized keyboard shortcut matrix:
-    - Playback: `Space` (play/pause), `← / →` (seek ±5s), `↑ / ↓` (volume ±10%), `M` (mute), `F` (fullscreen), `T` (theater mode), `Shift + R` (resync).
+    - Playback: `Space` (play/pause), `← / →` (seek ±5s), `↑ / ↓` (volume ±10%), `M` (mute), `F` (fullscreen), `T` (theater mode), `S` (toggle subtitles), `Shift + R` (resync).
     - Communication: `V` (Push-to-Talk), `C` (toggle fullscreen communication drawer).
     - Workspace: `[` / `]` (collapse/expand sidebar), `?` (help modal), `Esc` (dismiss overlays/modals).
   - Global shortcut listener with strict `isTypingElement` protection preventing accidental trigger when typing in chat or input fields.
   - Japanese-aesthetic `KeyboardShortcutsModal` displaying all categorized keybindings with keyboard keycaps (`kbd`).
+- [x] **Task 8.5: External Subtitle Support (`subtitles.ts`, `subtitles.test.ts`, `VideoPlayer.tsx`)**:
+  - Client-side parser for `.srt` (SubRip) and `.vtt` (WebVTT) subtitle formats with automatic detection.
+  - Robust timing parsing supporting 3-part comma (`01:02:03,500`), 3-part dot (`01:02:03.500`), and 2-part short format (`02:03.500`).
+  - Cue text sanitizer stripping HTML tags (`<i>`, `<b>`, `<c.color>`) and ASS/SSA positioning tags (`{\an8}`) while preserving dialogue.
+  - Microsecond active cue lookups (`findActiveCues`) synchronized to local HTML5 video playback.
+  - Subtitle customization popover:
+    - Quick enable/disable toggle and keyboard shortcut `S`.
+    - Local file loader and cue counter indicator.
+    - Font size selection: S (18px), M (22px), L (26px), XL (32px), with automatic 1.3x scaling in Fullscreen mode.
+    - Font colors: White (`#FFFFFF`), Yellow (`#FFE600`), Cyan (`#00F5FF`), Green (`#4EFA90`).
+    - Background opacity: None (`transparent`), Medium (`rgba(0,0,0,0.65)`), Solid (`rgba(0,0,0,0.95)`).
+    - Text shadow toggle for maximum contrast over bright anime scenes.
+  - Controls autohide pause: keeps controls visible while customizing subtitle appearance.
+- [x] **Task 8.6: Media Management Dashboard (`storage.py`, `rooms.py`, `mediaUtils.ts`, `MediaManagementModal.tsx`, `test_media.py`, `media.test.ts`)**:
+  - Real-time host disk storage metrics: total disk space, free disk space, and byte usage breakdown (AnimeSync video files vs temp upload chunks) via `shutil.disk_usage`.
+  - Visual storage usage bar with multi-segment proportional progress and free space indicator.
+  - Host-only REST API endpoints:
+    - `GET /api/rooms/{code}/media`: returns storage capacity and queued episode files with `file_exists_on_disk` and `is_active` flags.
+    - `DELETE /api/rooms/{code}/media/{episode_id}`: host-only permanent file deletion from `storage/videos/` and database queue with Socket.IO `queue_updated` broadcast.
+    - `POST /api/rooms/{code}/media/purge`: cleans orphaned upload chunks and temporary files from `storage/uploads_temp/`.
+  - Frontend `MediaManagementModal` with mandatory confirmation dialog preventing accidental video deletion.
+  - Integrated into `RoomPage.tsx` header for hosts.
 
 ---
 
 ## 4. In-Progress Features
-- **Phase 8: Watch-Room Polish & UI/UX Experience** — Tasks 8.1–8.4 Completed (50% of Phase 8). Tasks 8.5–8.6 remaining.
+- None (Phase 8 is 100% complete).
 
 ---
 
 ## 5. Pending Features
-- Phase 8 (Remaining):
-  - Task 8.5: External subtitle support (`.srt` and `.vtt` file parser with customizable font size, color, and background).
-  - Task 8.6: Media Management Dashboard (view disk usage, inspect stored videos, and manually delete files with confirmation).
-- Phase 9: End-to-end testing, security audits, Cloudflare Quick Tunnel integration.
+- **Phase 9: Testing, Security & Free Deployment**:
+  - Task 9.1: Comprehensive end-to-end multi-user testing & edge case verification.
+  - Task 9.2: Security review & audit (directory traversal, session authorization, injection prevention).
+  - Task 9.3: Free cloud deployment automation (Cloudflare Quick Tunnel / Tailscale setup).
+  - Task 9.4: Final documentation and handoff verification.
 
 ---
 
@@ -283,21 +306,21 @@
 - `backend/tests/test_sync.py` (26 tests) — **PASSED**
 - `backend/tests/test_queue.py` (10 tests) — **PASSED**
 - `backend/tests/test_chat_and_voice.py` (8 tests) — **PASSED**
+- `backend/tests/test_media.py` (4 tests, Phase 8) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
 - `frontend/tests/chat_voice.test.ts` (18 unit tests) — **PASSED**
-- `frontend/tests/room_polish.test.ts` (9 unit tests, Phase 8) — **PASSED**:
-  - `formatTime`: Edge cases (0s, NaN, negatives, seconds, mm:ss, hh:mm:ss).
-  - `isTypingElement`: Input element suppression for shortcuts.
-  - `volumeToGain`: Popover peer voice slider mapping and clamping (0%–200%).
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,129 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 64 backend tests + 68 frontend unit tests + Vite build)
+- `frontend/tests/room_polish.test.ts` (9 unit tests, Phase 8) — **PASSED**
+- `frontend/tests/subtitles.test.ts` (13 unit tests, Phase 8) — **PASSED**
+- `frontend/tests/media.test.ts` (6 unit tests, Phase 8) — **PASSED**
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 68 backend tests + 87 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 8: Task 8.5 — External Subtitle Support (`.srt` and `.vtt` file parser with customizable font size, color, and background)**.
+- **Phase 9: Task 9.1 — Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios**.
 
 ---
 
@@ -323,3 +346,5 @@
 - **Typing Element Suppression for Hotkeys**: `isTypingElement` target inspection ensures that typing in chat or text inputs never activates hotkeys or microphone.
 - **In-Player Fullscreen Communication Drawer**: Slide-over frosted glass drawer inside fullscreen mode provides complete access to chat, voice, and participants without exiting fullscreen.
 - **Inactivity Cursor Autohide**: Automatically hides the mouse cursor and overlays after 2.5s of inactivity during playback, preventing screen distractions.
+- **Client-Side Subtitle Synchronization with Dynamic Scaling**: SRT/VTT parsing runs on client thread with zero server upload; cues scale up 1.3x automatically in Fullscreen mode for living room display legibility.
+- **Local Host Storage Inspection & Protected Purging**: Host-only disk telemetry inspects exact macOS filesystem disk usage via `shutil.disk_usage`; mandatory confirmation dialogs protect against accidental video deletion.

@@ -21,6 +21,7 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Keyboard,
+  HardDrive,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
@@ -46,6 +47,7 @@ import { ChatPanel } from '../components/chat/ChatPanel';
 import { VoiceControlBar } from '../components/voice/VoiceControlBar';
 import { ParticipantProfileModal } from '../components/room/ParticipantProfileModal';
 import { KeyboardShortcutsModal } from '../components/room/KeyboardShortcutsModal';
+import { MediaManagementModal } from '../components/room/MediaManagementModal';
 import { isTypingElement } from '../services/webrtc';
 
 export const RoomPage: React.FC = () => {
@@ -237,6 +239,7 @@ export const RoomPage: React.FC = () => {
   const [selectedProfileParticipant, setSelectedProfileParticipant] =
     useState<ParticipantPresence | null>(null);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
+  const [showMediaModal, setShowMediaModal] = useState<boolean>(false);
 
   // Phase 8: Global Keyboard Shortcuts
   useEffect(() => {
@@ -654,6 +657,18 @@ export const RoomPage: React.FC = () => {
           >
             {copied ? 'Link Copied!' : 'Copy Invite Link'}
           </Button>
+
+          {/* Phase 8 Task 8.6: Host Media Storage Dashboard Trigger */}
+          {auth?.is_host && (
+            <button
+              onClick={() => setShowMediaModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-void-900 border border-void-700 text-ink-muted hover:text-white hover:border-violet-500/50 transition-colors text-xs font-medium"
+              title="Host Media & Storage Dashboard"
+            >
+              <HardDrive className="w-4 h-4 text-violet-400" />
+              <span className="hidden sm:inline">Storage</span>
+            </button>
+          )}
 
           {/* Phase 8 Task 8.4: Keyboard Shortcuts Trigger */}
           <button
@@ -1225,6 +1240,17 @@ export const RoomPage: React.FC = () => {
         isOpen={showShortcutsModal}
         onClose={() => setShowShortcutsModal(false)}
       />
+
+      {/* Phase 8 Task 8.6: Host Media Storage Dashboard Modal */}
+      {auth?.is_host && room && (
+        <MediaManagementModal
+          isOpen={showMediaModal}
+          onClose={() => setShowMediaModal(false)}
+          roomCode={room.code}
+          auth={auth}
+          onEpisodeDeleted={handleRemoveEpisode}
+        />
+      )}
     </div>
   );
 };

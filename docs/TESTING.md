@@ -93,6 +93,11 @@ Located in `backend/tests/`:
   - `test_voice_manager_lifecycle`: Tests in-memory `VoiceManager` add, remove, mute toggle, and peer listing.
   - `test_voice_socket_join_leave_lifecycle`: Tests Socket.IO `voice_join` and `voice_leave` signaling events with presence updates.
   - `test_voice_socket_webrtc_signaling`: Tests WebRTC signaling relay (`voice_offer`, `voice_answer`, `voice_ice_candidate`, `voice_mute_toggle`).
+- **`test_media.py`** (Phase 8 Task 8.6):
+  - `test_storage_service_usage`: Direct verification of host total, free, and AnimeSync storage byte calculations.
+  - `test_get_media_dashboard_api`: Authentication verification, retrieval of host storage capacity, and list of queued video episodes with disk existence flags.
+  - `test_delete_media_file_host_and_permission`: Rejection of non-host deletion attempts (403 Forbidden), successful host deletion from storage disk and queue, and 404 handling.
+  - `test_purge_temp_storage`: Verification that temporary upload chunk sessions are safely purged from `storage/uploads_temp/` by host.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -126,6 +131,17 @@ Located in `frontend/tests/`:
   - `formatTime`: validates player timestamp formatting across zero, negative, NaN, sub-minute, mm:ss, and hh:mm:ss durations.
   - `isTypingElement`: verifies shortcut key suppression when typing in text inputs, textareas, selects, and contentEditable elements.
   - `volumeToGain`: validates profile popover peer voice volume slider (0% to 200%) and boundary clamping.
+- **`subtitles.test.ts`** (13 unit tests, Task 8.5):
+  - `parseTimestamp`: validates 3-part SRT timestamp with comma, 3-part VTT with dot, 2-part short VTT, and malformed safety.
+  - `cleanSubtitleText`: validates stripping of HTML tags (`<i>`, `<b>`) and ASS/SSA positioning tags (`{\an8}`).
+  - `parseSRT`: validates multi-line dialogue parsing and blank-line cue demarcation.
+  - `parseVTT`: validates WebVTT header handling and dot timestamp parsing.
+  - `parseSubtitles`: validates automatic format detection by file extension and header.
+  - `findActiveCues`: boundary-precise lookup of active cues based on video current time.
+- **`media.test.ts`** (6 unit tests, Task 8.6):
+  - `formatBytes`: validates byte formatting across B, KB, MB, GB, negative, and NaN values.
+  - `calculateStoragePercent`: validates host storage percentage calculation, zero-division guarding, and 100% clamping.
+  - `formatEpisodeCode`: validates standard S01E01 padding and non-zero normalization.
 
 ---
 

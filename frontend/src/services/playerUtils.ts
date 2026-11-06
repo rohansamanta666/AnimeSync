@@ -19,3 +19,4 @@ export function formatTime(seconds: number): string {
   }
   return `${mins}:${paddedSecs}`;
 }
+

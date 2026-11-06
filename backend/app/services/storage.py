@@ -4,6 +4,7 @@ import json
 import uuid
 import shutil
 import hashlib
+import time
 import aiofiles
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
@@ -261,4 +262,89 @@ class StorageService:
             shutil.rmtree(upload_dir, ignore_errors=True)
             return True
         return False
+
+    @staticmethod
+    def get_storage_usage() -> Dict[str, Any]:
+        """
+        Phase 8 Task 8.6: Computes host disk storage metrics:
+        - Total disk capacity
+        - Free disk space
+        - Total bytes utilized by AnimeSync (videos + temp chunks)
+        - Video storage bytes
+        - Temp upload storage bytes
+        """
+        storage_path = Path(settings.STORAGE_DIR)
+        storage_path.mkdir(parents=True, exist_ok=True)
+        temp_path = Path(settings.TEMP_UPLOAD_DIR)
+        temp_path.mkdir(parents=True, exist_ok=True)
+
+        disk = shutil.disk_usage(str(storage_path))
+
+        video_bytes = 0
+        if storage_path.exists():
+            for f in storage_path.rglob("*"):
+                if f.is_file():
+                    try:
+                        video_bytes += f.stat().st_size
+                    except OSError:
+                        pass
+
+        temp_bytes = 0
+        if temp_path.exists():
+            for f in temp_path.rglob("*"):
+                if f.is_file():
+                    try:
+                        temp_bytes += f.stat().st_size
+                    except OSError:
+                        pass
+
+        animesync_total = video_bytes + temp_bytes
+
+        return {
+            "total_disk_bytes": disk.total,
+            "free_disk_bytes": disk.free,
+            "animesync_used_bytes": animesync_total,
+            "video_storage_bytes": video_bytes,
+            "temp_storage_bytes": temp_bytes,
+        }
+
+    @staticmethod
+    def purge_temp_storage(max_age_seconds: int = 3600) -> Dict[str, Any]:
+        """
+        Phase 8 Task 8.6: Purges temporary upload folders and orphaned chunks
+        older than max_age_seconds (or all if max_age_seconds == 0).
+        """
+        temp_path = Path(settings.TEMP_UPLOAD_DIR)
+        if not temp_path.exists():
+            return {"freed_bytes": 0, "purged_count": 0}
+
+        now = time.time()
+        freed_bytes = 0
+        purged_count = 0
+
+        for item in temp_path.iterdir():
+            try:
+                if item.is_dir():
+                    mtime = item.stat().st_mtime
+                    if max_age_seconds <= 0 or (now - mtime) >= max_age_seconds:
+                        for f in item.rglob("*"):
+                            if f.is_file():
+                                try:
+                                    freed_bytes += f.stat().st_size
+                                except OSError:
+                                    pass
+                        shutil.rmtree(item, ignore_errors=True)
+                        purged_count += 1
+                elif item.is_file():
+                    if item.name == ".gitkeep":
+                        continue
+                    mtime = item.stat().st_mtime
+                    if max_age_seconds <= 0 or (now - mtime) >= max_age_seconds:
+                        freed_bytes += item.stat().st_size
+                        item.unlink(missing_ok=True)
+                        purged_count += 1
+            except OSError:
+                pass
+
+        return {"freed_bytes": freed_bytes, "purged_count": purged_count}
 
