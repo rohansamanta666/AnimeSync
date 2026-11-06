@@ -4,7 +4,7 @@
 - **Current Phase**: Phase 8 (Watch-Room Polish & UI/UX Experience) — **COMPLETED (100%)**
 - **Next Task**: **Phase 9 — Task 9.1: Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios**
 - **Git Branch**: `main`
-- **Latest Commit**: `ea3b734` (`feat(phase-8): implement watch-room polish part 1 (tasks 8.1-8.4)`)
+- **Latest Commit**: `912be5c` (`feat(phase-8): implement external subtitles and media management dashboard (tasks 8.5-8.6)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
