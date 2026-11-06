@@ -55,7 +55,7 @@ AnimeSync is a private, desktop-first, online anime watch-party application allo
 ### 2. Launch AnimeSync
 ```bash
 # Clone and enter directory
-git clone <repository-url>
+git clone https://github.com/rohansamanta666/AnimeSync.git
 cd AnimeSync
 
 # Start the application (auto-creates .env, installs dependencies, builds frontend, launches server)
