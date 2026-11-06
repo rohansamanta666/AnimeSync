@@ -35,7 +35,22 @@ fi
 
 # 3. Check and build frontend assets
 REBUILD_FRONTEND=false
-if [ "$1" == "--build" ] || [ ! -d "frontend/dist" ]; then
+START_TUNNEL=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --build)
+            REBUILD_FRONTEND=true
+            ;;
+        --tunnel)
+            START_TUNNEL=true
+            ;;
+        *)
+            ;;
+    esac
+done
+
+if [ ! -d "frontend/dist" ]; then
     REBUILD_FRONTEND=true
 fi
 
@@ -60,9 +75,46 @@ if command -v caffeinate >/dev/null 2>&1; then
     CAFFEINATE_PID=$!
 fi
 
+# 6. Optional Cloudflare Quick Tunnel
+CLOUDFLARED_PID=""
+if [ "$START_TUNNEL" = true ]; then
+    if command -v cloudflared >/dev/null 2>&1; then
+        echo "🌐 Starting Cloudflare Quick Tunnel..."
+        mkdir -p storage
+        cloudflared tunnel --url http://localhost:8000 > storage/tunnel.log 2>&1 &
+        CLOUDFLARED_PID=$!
+
+        # Wait up to 10 seconds for the tunnel URL to appear in the log
+        TUNNEL_URL=""
+        for i in {1..20}; do
+            TUNNEL_URL=$(grep -oE "https://[a-zA-Z0-9-]+\.trycloudflare\.com" storage/tunnel.log | head -n 1 || true)
+            if [ -n "$TUNNEL_URL" ]; then
+                break
+            fi
+            sleep 0.5
+        done
+
+        if [ -n "$TUNNEL_URL" ]; then
+            echo ""
+            echo "=========================================================="
+            echo "🎉 Cloudflare Quick Tunnel Live! Share this link with your friend:"
+            echo "👉 $TUNNEL_URL"
+            echo "=========================================================="
+            echo ""
+        else
+            echo "⚠️  Tunnel initiated in background. Check 'cat storage/tunnel.log' for public link."
+        fi
+    else
+        echo "⚠️  cloudflared is not installed. Run 'brew install cloudflared' to enable --tunnel."
+    fi
+fi
+
 cleanup() {
     echo ""
     echo "🌸 Shutting down AnimeSync..."
+    if [ -n "$CLOUDFLARED_PID" ]; then
+        kill "$CLOUDFLARED_PID" 2>/dev/null || true
+    fi
     if [ -n "$CAFFEINATE_PID" ]; then
         kill "$CAFFEINATE_PID" 2>/dev/null || true
     fi
@@ -72,15 +124,16 @@ trap cleanup EXIT INT TERM
 echo ""
 echo "🚀 AnimeSync Server starting at http://localhost:8000"
 echo "   Local LAN Address: http://$(ipconfig getifaddr en0 2>/dev/null || echo 'localhost'):8000"
-echo ""
-echo "🌐 Free Public Sharing Options:"
-echo "   1. Cloudflare Quick Tunnel (Zero setup, zero credit card):"
-echo "      Run in a second terminal: cloudflared tunnel --url http://localhost:8000"
-echo "   2. Tailscale WireGuard Mesh (Highest direct peer-to-peer speed):"
-echo "      Share your Tailscale IP: http://100.x.y.z:8000"
+if [ "$START_TUNNEL" = false ]; then
+    echo ""
+    echo "🌐 Free Public Sharing Options:"
+    echo "   1. Auto-Tunnel:  Restart with ./scripts/start.sh --tunnel"
+    echo "   2. Manual:       In a separate terminal, run: cloudflared tunnel --url http://localhost:8000"
+    echo "   3. Tailscale:    Share your Tailscale IP: http://100.x.y.z:8000"
+fi
 echo "=========================================================="
 echo ""
 
 # Start FastAPI Uvicorn server
-exec uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000
 

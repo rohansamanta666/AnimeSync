@@ -13,14 +13,14 @@ else
 fi
 
 # Kill any lingering cloudflared tunnel processes if desired
-CF_PID=$(pgrep -f "cloudflared tunnel" || true)
+CF_PID=$(pgrep -f "cloudflared tunnel" 2>/dev/null || true)
 if [ -n "$CF_PID" ]; then
     echo "Stopping background cloudflared tunnel (PID $CF_PID)..."
     kill -9 $CF_PID 2>/dev/null || true
 fi
 
 # Stop caffeinate sleep-prevention processes
-CAFF_PIDS=$(pgrep -f "caffeinate -dimsu" || true)
+CAFF_PIDS=$(pgrep -f "caffeinate -dimsu" 2>/dev/null || true)
 if [ -n "$CAFF_PIDS" ]; then
     echo "Stopping caffeinate sleep-prevention process(es)..."
     kill -9 $CAFF_PIDS 2>/dev/null || true

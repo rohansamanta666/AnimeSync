@@ -36,11 +36,14 @@ All tools are free and open-source:
 ### 3.1 One-Click Start Script
 AnimeSync includes an automated startup script:
 ```bash
+# Standard local start:
 ./scripts/start.sh
-```
-To force a rebuild of frontend assets:
-```bash
-./scripts/start.sh --build
+
+# Start with automatic Cloudflare Quick Tunnel (generates live public HTTPS link):
+./scripts/start.sh --tunnel
+
+# Force rebuild of frontend production assets and launch tunnel:
+./scripts/start.sh --build --tunnel
 ```
 
 **What `scripts/start.sh` does automatically:**
@@ -50,9 +53,10 @@ To force a rebuild of frontend assets:
 4. **Frontend Asset Verification**: Automatically installs npm packages and builds production assets (`frontend/dist`) if missing or when invoked with `--build`.
 5. **Storage Directory Verification**: Verifies `storage/videos` and `storage/uploads_temp` directories exist.
 6. **macOS Sleep Prevention**: Launches `caffeinate -dimsu` to keep disk, system, and network interfaces active during the anime night.
-7. **Signal Handling**: Sets traps for `EXIT`, `INT`, and `TERM` to terminate background caffeinate processes cleanly on server exit.
-8. **Network Guidance**: Prints local LAN IP and instructions for free Cloudflare Quick Tunnel and Tailscale sharing.
-9. **Server Launch**: Starts FastAPI + Socket.IO production server on `0.0.0.0:8000`.
+7. **Cloudflare Quick Tunnel Integration**: When invoked with `--tunnel`, launches `cloudflared` in the background, captures the generated `https://*.trycloudflare.com` URL, and displays it in the terminal.
+8. **Signal Handling**: Sets traps for `EXIT`, `INT`, and `TERM` to terminate background caffeinate and cloudflared processes cleanly on server exit.
+9. **Network Guidance**: Prints local LAN IP and instructions for free Cloudflare Quick Tunnel and Tailscale sharing.
+10. **Server Launch**: Starts FastAPI + Socket.IO production server on `0.0.0.0:8000`.
 
 ### 3.2 Stopping AnimeSync
 To cleanly terminate AnimeSync services:
@@ -70,11 +74,17 @@ This script cleanly stops:
 
 ### Option A: Cloudflare Quick Tunnel (Zero Account, Zero Credit Card)
 Quick Tunnels allow anyone to expose a local HTTP port over a secure HTTPS public URL without signing up for Cloudflare:
-```bash
-cloudflared tunnel --url http://localhost:8000
-```
-- Cloudflare outputs a URL like: `https://brave-falcon-abc.trycloudflare.com`.
-- Send this link to your friend!
+- **One-click command**:
+  ```bash
+  ./scripts/start.sh --tunnel
+  ```
+  The script automatically starts the tunnel and prints:
+  `🎉 Cloudflare Quick Tunnel Live! Share this link with your friend: https://*.trycloudflare.com`
+- **Manual alternative (run in a separate terminal)**:
+  ```bash
+  cloudflared tunnel --url http://localhost:8000
+  ```
+- Send the printed link to your friend!
 - **Note**: Thanks to AnimeSync's 5MB chunked upload architecture, files uploaded stay comfortably within Cloudflare's 100MB body limit.
 
 ### Option B: Tailscale WireGuard Mesh (Maximum Speed & Security)

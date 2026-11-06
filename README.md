@@ -61,18 +61,20 @@ cd AnimeSync
 # Start the application (auto-creates .env, installs dependencies, builds frontend, launches server)
 ./scripts/start.sh
 
+# Or start with automatic Cloudflare Quick Tunnel (prints public link for your friend):
+./scripts/start.sh --tunnel
+
 # Or force rebuild of frontend production assets:
-./scripts/start.sh --build
+./scripts/start.sh --build --tunnel
 ```
 
 Open `http://localhost:8000` in your browser.
 
 ### 3. Share with Your Friend (100% Free)
 - **Option A — Cloudflare Quick Tunnel** (Instant HTTPS URL, zero account needed):
-  ```bash
-  cloudflared tunnel --url http://localhost:8000
-  ```
-  Share the printed `https://*.trycloudflare.com` URL with your friend!
+  - When started with `./scripts/start.sh --tunnel`, the public link is printed directly in your terminal.
+  - Or run manually in a separate terminal: `cloudflared tunnel --url http://localhost:8000`
+  - Share the generated `https://*.trycloudflare.com` URL with your friend!
 - **Option B — Tailscale WireGuard Mesh** (Fastest direct P2P speed; bypasses symmetric NAT):
   Share your Mac's Tailscale IP: `http://100.x.y.z:8000`.
 

@@ -24,10 +24,12 @@ fastapi_app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS setup
+# CORS setup: allow local dev, configured origins, and dynamic Cloudflare Quick Tunnel / LAN / Tailscale domains
+configured_origins = ["*"] if (settings.ENVIRONMENT == "development" or "*" in settings.cors_origins_list) else settings.cors_origins_list
 fastapi_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.ENVIRONMENT == "development" else settings.cors_origins_list,
+    allow_origins=configured_origins,
+    allow_origin_regex=r"^https?://([a-zA-Z0-9-]+\.)*trycloudflare\.com(:[0-9]+)?$|^https?://(localhost|127\.0\.0\.1|100\..*|192\.168\..*|10\..*)(:[0-9]+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
