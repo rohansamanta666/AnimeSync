@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import aiofiles
 from backend.app.database import get_db
+from backend.app.config import settings
 from backend.app.models.room import Room
 from backend.app.models.participant import Participant
 from backend.app.models.episode import Episode
@@ -193,8 +194,14 @@ async def download_file(
     participant_id: Optional[str] = Query(None),
     token: Optional[str] = Query(None),
     auth_header: Optional[str] = Header(None, alias="Authorization"),
+    x_participant_id: Optional[str] = Header(None, alias="X-Participant-ID"),
+    x_session_token: Optional[str] = Header(None, alias="X-Session-Token"),
     db: AsyncSession = Depends(get_db)
 ):
+    # Resolve participant credentials from Query or Header
+    effective_participant_id = participant_id or x_participant_id
+    effective_token = token or x_session_token
+
     # Lookup episode in database
     query = select(Episode).where(Episode.id == episode_id)
     res = await db.execute(query)
@@ -206,12 +213,19 @@ async def download_file(
     await verify_participant_auth(
         db,
         room_id=episode.room_id,
-        participant_id=participant_id,
-        token=token,
+        participant_id=effective_participant_id,
+        token=effective_token,
         auth_header=auth_header
     )
 
-    file_path = Path(episode.file_path)
+    file_path = Path(episode.file_path).resolve()
+    storage_root = Path(settings.STORAGE_DIR).resolve()
+    if not str(file_path).startswith(str(storage_root)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: file path is outside the allowed storage directory"
+        )
+
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file missing from host disk")
 
@@ -288,9 +302,11 @@ async def delete_episode(
     if not participant.is_host:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the room host can delete episodes")
 
-    file_path = Path(episode.file_path)
-    freed_bytes = file_path.stat().st_size if file_path.exists() else 0
-    if file_path.exists():
+    file_path = Path(episode.file_path).resolve()
+    storage_root = Path(settings.STORAGE_DIR).resolve()
+    freed_bytes = 0
+    if str(file_path).startswith(str(storage_root)) and file_path.exists() and file_path.is_file():
+        freed_bytes = file_path.stat().st_size
         file_path.unlink()
 
     await db.delete(episode)

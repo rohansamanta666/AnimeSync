@@ -19,5 +19,12 @@ if [ -n "$CF_PID" ]; then
     kill -9 $CF_PID 2>/dev/null || true
 fi
 
+# Stop caffeinate sleep-prevention processes
+CAFF_PIDS=$(pgrep -f "caffeinate -dimsu" || true)
+if [ -n "$CAFF_PIDS" ]; then
+    echo "Stopping caffeinate sleep-prevention process(es)..."
+    kill -9 $CAFF_PIDS 2>/dev/null || true
+fi
+
 echo "All AnimeSync services stopped cleanly."
 

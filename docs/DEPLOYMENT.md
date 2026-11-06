@@ -34,26 +34,39 @@ All tools are free and open-source:
 ## 3. Quick Start (Development & Watch Party)
 
 ### 3.1 One-Click Start Script
-AnimeSync includes a automated start script:
+AnimeSync includes an automated startup script:
 ```bash
 ./scripts/start.sh
 ```
-This script:
-1. Activates Python `.venv` and installs dependencies.
-2. Builds the React frontend if needed (or launches frontend dev server).
-3. Starts the FastAPI + Socket.IO server on `http://localhost:8000`.
-4. Keeps your Mac awake during the session using macOS `caffeinate`.
-5. Prompts to launch Cloudflare Quick Tunnel and outputs the public HTTPS link for your friend.
+To force a rebuild of frontend assets:
+```bash
+./scripts/start.sh --build
+```
+
+**What `scripts/start.sh` does automatically:**
+1. **Environment Configuration**: Checks for `.env`; automatically initializes `.env` from `.env.example` if not found.
+2. **Port Conflict Check**: Detects if port 8000 is occupied; warns and exits cleanly with guidance to run `./scripts/stop.sh`.
+3. **Python Virtual Environment**: Checks for `.venv`; creates virtual environment and installs dependencies if needed, then activates it.
+4. **Frontend Asset Verification**: Automatically installs npm packages and builds production assets (`frontend/dist`) if missing or when invoked with `--build`.
+5. **Storage Directory Verification**: Verifies `storage/videos` and `storage/uploads_temp` directories exist.
+6. **macOS Sleep Prevention**: Launches `caffeinate -dimsu` to keep disk, system, and network interfaces active during the anime night.
+7. **Signal Handling**: Sets traps for `EXIT`, `INT`, and `TERM` to terminate background caffeinate processes cleanly on server exit.
+8. **Network Guidance**: Prints local LAN IP and instructions for free Cloudflare Quick Tunnel and Tailscale sharing.
+9. **Server Launch**: Starts FastAPI + Socket.IO production server on `0.0.0.0:8000`.
 
 ### 3.2 Stopping AnimeSync
-To cleanly stop the application and background tunnel:
+To cleanly terminate AnimeSync services:
 ```bash
 ./scripts/stop.sh
 ```
+This script cleanly stops:
+1. Running Uvicorn server processes on port 8000.
+2. Background `cloudflared tunnel` instances.
+3. Background macOS `caffeinate` sleep-prevention processes.
 
 ---
 
-## 4. Public Tunnel Setup Options
+## 4. Public Tunnel & Network Setup Options
 
 ### Option A: Cloudflare Quick Tunnel (Zero Account, Zero Credit Card)
 Quick Tunnels allow anyone to expose a local HTTP port over a secure HTTPS public URL without signing up for Cloudflare:
@@ -70,10 +83,45 @@ If you and your friend both use Tailscale (free personal plan, up to 3 users):
 2. Share the Host Mac's Tailscale IP (e.g., `http://100.x.y.z:8000`).
 3. Your friend opens `http://100.x.y.z:8000` in Chrome or Safari.
 4. Video file transfers run directly over local/peer-to-peer WireGuard at your full ISP upload/download speed!
+5. **Bypasses Symmetric NAT**: Because Tailscale creates an encrypted point-to-point WireGuard tunnel, WebRTC and HTTP traffic navigate enterprise NATs without requiring paid TURN servers.
 
 ---
 
-## 5. macOS Sleep & Power Management
+## 5. WebRTC Network Architecture & NAT Traversal
+
+AnimeSync voice chat operates peer-to-peer using WebRTC:
+- **STUN Signaling**: Free public Google STUN servers (`stun:stun.l.google.com:19302`) resolve external public IP and port mappings.
+- **Supported Topologies**: Full Cone NAT, Address-Restricted Cone NAT, Port-Restricted Cone NAT, and local LANs. Covers virtually all standard home Wi-Fi and residential ISP connections.
+- **Symmetric NAT Boundary**: Strict enterprise networks and institutional firewalls (e.g. universities, corporate VPNs) allocate random port mappings per destination, which prevents STUN from establishing direct UDP hole punching.
+- **Recommended Free Alternative**: When connecting across restrictive firewalls, use **Tailscale** (Option B above). It provides a direct virtual network connection between both computers, bypassing symmetric firewall restrictions with zero cloud cost.
+
+---
+
+## 6. Environment Variable Reference
+
+The application loads configuration from `.env` (derived from `.env.example`):
+
+| Variable | Default Value | Description |
+| :--- | :--- | :--- |
+| `HOST` | `0.0.0.0` | Server bind IP address. |
+| `PORT` | `8000` | Server HTTP/WebSocket port. |
+| `ENVIRONMENT` | `development` | Deployment environment mode (`development` / `production`). |
+| `FRONTEND_PORT` | `5173` | Vite development server port (dev mode only). |
+| `DATABASE_URL` | `sqlite+aiosqlite:///...` | Async SQLite database path. |
+| `STORAGE_DIR` | `./storage/videos` | Target directory for completed episode videos. |
+| `TEMP_UPLOAD_DIR` | `./storage/uploads_temp` | Temporary directory for chunked upload sessions. |
+| `MAX_UPLOAD_SIZE_MB`| `4096` (4 GB) | Maximum allowed file upload size. |
+| `CHUNK_SIZE_BYTES` | `5242880` (5 MB) | Chunk size for chunked upload API (Cloudflare safe). |
+| `CORS_ORIGINS` | Comma-separated | Allowed HTTP origins for CORS policy. |
+| `STUN_SERVERS` | Google STUN servers | Free STUN servers for WebRTC NAT traversal. |
+| `TURN_SERVER_URL` | `""` | Optional TURN server URL (empty by default). |
+| `DRIFT_IGNORE_THRESHOLD` | `0.25` | Playback drift tolerance in seconds. |
+| `DRIFT_RATE_ADJUST_THRESHOLD` | `1.5` | Threshold for micro-drift speed adjustment (±5%). |
+| `DRIFT_HARD_SEEK_THRESHOLD` | `3.0` | Threshold for hard seek alignment. |
+
+---
+
+## 7. macOS Sleep & Power Management
 
 When hosting a watch party, macOS might sleep if idle.
 AnimeSync's start script automatically executes:
@@ -82,11 +130,11 @@ caffeinate -dimsu -w $$ &
 ```
 This ensures:
 - Displays can sleep if desired (`-d`), but the system, disk, and network interfaces remain active (`-i -m -s -u`) while AnimeSync is running.
-- Once you terminate AnimeSync, sleep behavior returns to normal immediately.
+- Once you terminate AnimeSync or run `./scripts/stop.sh`, sleep behavior returns to normal immediately.
 
 ---
 
-## 6. Troubleshooting
+## 8. Troubleshooting
 
 - **Friend cannot open the tunnel URL**:
   - Verify `cloudflared` is running in your terminal.
@@ -94,6 +142,7 @@ This ensures:
 - **Microphone permission blocked**:
   - In macOS System Settings $\rightarrow$ Privacy & Security $\rightarrow$ Microphone, ensure your browser (Chrome or Safari) has microphone permissions granted.
 - **Port 8000 already in use**:
-  - Check running processes: `lsof -i :8000`
-  - Terminate: `kill -9 <PID>`
+  - Run `./scripts/stop.sh` or inspect: `lsof -i :8000`.
+- **SPA 404 vs Backend API**:
+  - Missing `/api/*` and `socket.io` endpoints return structured JSON 404 error responses, while browser page refreshes (`/rooms/ABC123`) serve the SPA `index.html`.
 

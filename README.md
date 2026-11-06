@@ -18,6 +18,7 @@ AnimeSync is a private, desktop-first, online anime watch-party application allo
 - **Real-Time Text Chat & WebRTC Voice**: Low-latency voice chat via Google STUN with Push-to-Talk (`V`), voice activity indicators, and device selection.
 - **Independent Audio Controls**: Separate controls for local anime volume (0–100%) and peer voice volume (0–200% with gain boost). Muting a peer is local-only and does not affect the remote user's transmission.
 - **Discord-Inspired Watch Room**: Collapsible communication sidebar, fullscreen autohide controls, theater mode, and external subtitle (`.srt`/`.vtt`) support.
+- **Hardened Security & Boundary Containment**: Strict path containment checks blocking directory traversal in chunked uploads and file downloads, host-only permission barriers, and isolated Single Page Application routing (preventing API route masking).
 - **100% Free & Open Source**: Zero paid hosting, zero paid cloud databases, zero credit card requirements. Runs self-hosted on your Mac with free Cloudflare Quick Tunnel or Tailscale mesh.
 
 ---
@@ -26,7 +27,7 @@ AnimeSync is a private, desktop-first, online anime watch-party application allo
 
 - **Backend**: Python 3.10+, FastAPI, Python-SocketIO (ASGI), SQLAlchemy 2.0 (Async), SQLite (`aiosqlite`), Uvicorn.
 - **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, Lucide React, Socket.IO Client, Web Audio API, Web Workers.
-- **Networking**: Cloudflare Quick Tunnel / Tailscale WireGuard Mesh, Google Public STUN.
+- **Networking**: Cloudflare Quick Tunnel / Tailscale WireGuard Mesh, Google Public STUN (`stun:stun.l.google.com:19302`).
 
 ---
 
@@ -49,22 +50,47 @@ AnimeSync is a private, desktop-first, online anime watch-party application allo
 - macOS (Apple Silicon or Intel)
 - Python 3.10+
 - Node.js 18+ and npm
-- (Optional for public sharing) `brew install cloudflared`
+- (Optional for public sharing) `brew install cloudflared` or `brew install tailscale`
 
 ### 2. Launch AnimeSync
 ```bash
 # Clone and enter directory
 cd /Users/rohansamanta/Documents/AnimeSync
 
-# Start the application
+# Start the application (auto-creates .env, installs dependencies, builds frontend, launches server)
 ./scripts/start.sh
+
+# Or force rebuild of frontend production assets:
+./scripts/start.sh --build
 ```
 
-Open `http://localhost:8000` in your browser. If you launched Cloudflare Tunnel, share the printed `https://*.trycloudflare.com` URL with your friend!
+Open `http://localhost:8000` in your browser.
+
+### 3. Share with Your Friend (100% Free)
+- **Option A — Cloudflare Quick Tunnel** (Instant HTTPS URL, zero account needed):
+  ```bash
+  cloudflared tunnel --url http://localhost:8000
+  ```
+  Share the printed `https://*.trycloudflare.com` URL with your friend!
+- **Option B — Tailscale WireGuard Mesh** (Fastest direct P2P speed; bypasses symmetric NAT):
+  Share your Mac's Tailscale IP: `http://100.x.y.z:8000`.
+
+### 4. Stop Services
+```bash
+./scripts/stop.sh
+```
 
 ---
 
-## Acceptance Testing Checklist
+## Testing & Quality Verification
 
-AnimeSync is thoroughly verified against a 32-step acceptance criteria matrix covering chunked transfer, Web Worker hash verification, ready gates, drift correction, WebRTC voice, PTT, independent audio, and keyboard shortcuts. See [docs/TESTING.md](docs/TESTING.md) for details.
+AnimeSync includes a comprehensive automated test suite and two-computer validation protocol:
+- **Backend Test Suite**: 73 Pytest tests passing 100% (`backend/tests/`) covering presence, chunked upload/download, SHA-256 verification, ready state gates, drift correction, buffering coordination, queue management, chat/voice signaling, media management, security traversal guards, and end-to-end watch party workflows.
+- **Frontend Test Suite**: 87 unit tests passing 100% (`frontend/tests/`) covering drift calculations, audio gain, speaking RMS detection, PTT keyup safety, subtitle parsing, queue reordering, and sync health badges.
+- **Production Build**: Clean TypeScript compilation and Vite build (`tsc && vite build`).
+- **Master Test Runner**: Run all tests in one step:
+  ```bash
+  ./scripts/test.sh
+  ```
+- **Acceptance Protocol**: Step-by-step two-computer testing checklist detailed in [docs/TESTING.md](docs/TESTING.md).
 

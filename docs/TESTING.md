@@ -98,6 +98,12 @@ Located in `backend/tests/`:
   - `test_get_media_dashboard_api`: Authentication verification, retrieval of host storage capacity, and list of queued video episodes with disk existence flags.
   - `test_delete_media_file_host_and_permission`: Rejection of non-host deletion attempts (403 Forbidden), successful host deletion from storage disk and queue, and 404 handling.
   - `test_purge_temp_storage`: Verification that temporary upload chunk sessions are safely purged from `storage/uploads_temp/` by host.
+- **`test_security_and_e2e.py`** (Phase 9 Tasks 9.1 & 9.2):
+  - `test_security_upload_id_traversal_guards`: Verifies upload directory validation rejecting `../`, slash-only, or whitespace session IDs.
+  - `test_security_download_traversal_guards`: Verifies download endpoint strictly confines file path to storage directory and rejects directory escape attempts with 403 Forbidden.
+  - `test_security_host_only_actions_enforcement`: Tests host-only authorization barriers for queue removal, reorder, episode selection, media deletion, and chunk purging, verifying 403 Forbidden for non-host participants.
+  - `test_security_spa_missing_api_routes_404`: Verifies that requests for missing `/api/*` and `socket.io` routes return standard 404 JSON rather than being masked by SPA `index.html` fallback.
+  - `test_e2e_full_multi_user_watch_party_flow`: Comprehensive end-to-end integration test validating the entire watch-party lifecycle across two users: room creation, joining, chunked 5MB upload, resumable range download, SHA-256 verification, ready gate synchronization, 3-second countdown to watching, play/pause/seek synchronization, buffering detection and recovery, and host media deletion.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -169,4 +175,21 @@ Before declaring any release ready, execute this manual protocol across two inde
 | **16**| Test Independent Audio | Adjusting anime volume has zero effect on peer voice volume. | [ ] |
 | **17**| Test Sidebar Collapse | Clicking arrow collapses chat/participant sidebar; video expands smoothly. | [ ] |
 | **18**| Test Fullscreen Mode | Pressing `F` hides all UI elements; mouse movement shows controls; Escape exits. | [ ] |
+
+---
+
+## 4. Automated Testing vs Real-World Network Verification Notice
+
+### 4.1 Automated Test Guarantees
+The automated test suites (`./scripts/test.sh`, containing 73 backend pytest tests and 87 frontend unit tests) deterministically verify:
+- Complete REST API lifecycles, chunked 5MB upload assembly, range-request streaming downloads, and SHA-256 incremental hashing.
+- Server-authoritative playback state machine, drift correction formulas, and sequence-based loop suppression.
+- Multi-client buffering pauses, concurrent playback ended deduplication, and auto-next readiness gates.
+- Directory traversal guards, host-only permission barriers, and SPA 404 routing integrity.
+- Web Audio API gain calculations (0–200%), speaking detection RMS algorithms, and keyboard shortcut event isolation.
+
+### 4.2 Real-World Network Boundaries & WebRTC Constraints
+- **Domestic Networks & Home Wi-Fi**: Free Google STUN servers (`stun:stun.l.google.com:19302`) successfully resolve NAT candidates across Full Cone, Restricted Cone, and Port-Restricted Cone NAT configurations typical of residential internet connections and mobile hotspots.
+- **Enterprise / Symmetric NAT Restrictions**: Networks with strict Symmetric NATs (e.g. corporate VPNs, university firewalls) map different external ports for different destinations, preventing direct peer-to-peer UDP connectivity via STUN alone. In such environments, WebRTC voice communication would fail to establish direct peer connection unless a TURN relay is configured.
+- **Zero-Cost Workaround**: Tailscale WireGuard mesh provides a 100% free peer-to-peer encrypted tunnel between both machines that creates a virtual LAN, enabling direct STUN/P2P traversal without any paid TURN infrastructure.
 

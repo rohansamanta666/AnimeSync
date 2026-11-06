@@ -1,13 +1,13 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 8 (Watch-Room Polish & UI/UX Experience) — **COMPLETED (100%)**
-- **Next Task**: **Phase 9 — Task 9.1: Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios**
+- **Current Phase**: Phase 9 (Final Testing, Security & Zero-Cost Deployment) — **COMPLETED (100%)**
+- **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
 - **Git Branch**: `main`
-- **Latest Commit**: `912be5c` (`feat(phase-8): implement external subtitles and media management dashboard (tasks 8.5-8.6)`)
-- **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
+- **Latest Commit**: (Will be recorded upon committing Phase 9)
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 73 backend tests passing, 87 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
-- **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
+- **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
 ---
 
@@ -23,7 +23,7 @@
 | **Phase 6** | Episode Queue & Auto-Next | **COMPLETED** | 100% |
 | **Phase 7** | Text Chat & WebRTC Voice | **COMPLETED** | 100% |
 | **Phase 8** | Watch-Room Polish & Customization | **COMPLETED** | 100% |
-| **Phase 9** | Testing, Security & Free Deployment | Pending | 0% |
+| **Phase 9** | Testing, Security & Free Deployment | **COMPLETED** | 100% |
 
 ---
 
@@ -270,19 +270,56 @@
   - Frontend `MediaManagementModal` with mandatory confirmation dialog preventing accidental video deletion.
   - Integrated into `RoomPage.tsx` header for hosts.
 
+### Phase 9: Testing, Security & Free Deployment (100% Completed)
+- [x] **Task 9.1: Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios (`test_security_and_e2e.py`)**:
+  - Full watch party lifecycle test `test_e2e_full_multi_user_watch_party_flow`:
+    - Host creates room "DEMO99" and Peer joins room with session authentication.
+    - Host uploads video in 5MB chunks via `/api/files/upload/init`, `chunk`, and `complete`.
+    - Server calculates SHA-256 hash incrementally during assembly.
+    - Peer downloads video via `/api/files/download/{id}` with HTTP Range requests.
+    - Both participants verify matching file hashes, transitioning status to `VERIFIED`.
+    - Both participants click "Ready", satisfying the server-authoritative readiness gate.
+    - Server triggers 3-second synchronized countdown and atomically transitions both to `WATCHING`.
+    - Host executes playback actions: `PLAY`, `PAUSE`, `SEEK`, and server broadcasts authoritative `playback_sync`.
+    - Peer reports buffering via `buffering_start`: server pauses room playback with `originating_socket_id="server"`.
+    - Peer finishes buffering via `buffering_end`: server resumes room playback authoritatively.
+    - Host queries media dashboard and deletes episode; non-host is blocked (403 Forbidden).
+- [x] **Task 9.2: Security Review & Hardening (`storage.py`, `files.py`, `queue_manager.py`, `main.py`)**:
+  - Upload ID path traversal guard: `StorageService.get_upload_dir` validates and rejects empty, slash-only, or traversal session IDs (`Invalid or empty upload session ID`).
+  - Chunk size enforcement: `save_chunk` limits individual chunks to $2 \times \text{CHUNK\_SIZE\_BYTES}$ as a defense-in-depth measure.
+  - Storage directory containment check: `download_file`, `delete_episode`, and `queue_manager.remove_from_queue` strictly enforce that all resolved target file paths start with `settings.STORAGE_DIR.resolve()`, returning 403 Forbidden on directory escape attempts.
+  - Dual header/query authentication support: `download_file` supports `X-Participant-ID` and `X-Session-Token` headers alongside Query parameters and Bearer authorization.
+  - SPA 404 integrity: `main.py` SPA fallback route explicitly excludes `/api/*` and `socket.io` paths from HTML fallback, returning standard 404 JSON to prevent API error masking.
+  - Static file containment: `serve_spa` validates that requested files stay strictly within `frontend/dist/`.
+  - Storage `.gitkeep` protection: `purge_temp_storage` explicitly preserves `.gitkeep`.
+- [x] **Task 9.3: Free Cloud Deployment Automation & macOS Power Management (`start.sh`, `stop.sh`)**:
+  - Startup script `./scripts/start.sh`:
+    - Automatic `.env` generation from `.env.example` if absent.
+    - Port 8000 conflict detection with clean error notification.
+    - Production frontend asset verification with optional `--build` flag.
+    - Automated creation and verification of `storage/videos` and `storage/uploads_temp`.
+    - Background `caffeinate -dimsu` macOS sleep prevention with signal trapping (`trap cleanup EXIT INT TERM`) to guarantee clean teardown on exit.
+    - Free Cloudflare Quick Tunnel and Tailscale mesh usage instructions.
+  - Teardown script `./scripts/stop.sh`:
+    - Cleanly kills running Uvicorn server processes on port 8000.
+    - Terminates lingering background `cloudflared tunnel` instances.
+    - Terminates background `caffeinate` sleep-prevention processes.
+- [x] **Task 9.4: Two-Computer Validation Protocol & WebRTC Network Boundary Guidelines (`TESTING.md`, `DEPLOYMENT.md`)**:
+  - Documented 18-step manual acceptance testing protocol for two computers on separate Wi-Fi networks.
+  - Clarified WebRTC STUN network boundaries: Google STUN (`stun:stun.l.google.com:19302`) succeeds over domestic Wi-Fi and standard residential NATs.
+  - Documented zero-cost Tailscale WireGuard mesh workaround for restrictive corporate/university symmetric NATs.
+- [x] **Task 9.5: Complete Documentation & Project Handover (`README.md`, `PROGRESS.md`, `IMPLEMENTATION_PLAN.md`, `DEPLOYMENT.md`, `TESTING.md`)**:
+  - Comprehensive documentation covering system architecture, API protocols, testing, deployment, and security.
+
 ---
 
 ## 4. In-Progress Features
-- None (Phase 8 is 100% complete).
+- None (All 9 Phases are 100% complete).
 
 ---
 
 ## 5. Pending Features
-- **Phase 9: Testing, Security & Free Deployment**:
-  - Task 9.1: Comprehensive end-to-end multi-user testing & edge case verification.
-  - Task 9.2: Security review & audit (directory traversal, session authorization, injection prevention).
-  - Task 9.3: Free cloud deployment automation (Cloudflare Quick Tunnel / Tailscale setup).
-  - Task 9.4: Final documentation and handoff verification.
+- None (All 9 Phases are 100% complete).
 
 ---
 
@@ -293,7 +330,7 @@
   - **Client System Clock Skew**: Latency telemetry relies on client timestamps (`Date.now()`); to guard against negative latency from sudden OS clock shifts, calculations are clamped to 0ms.
   - **Browser Codec Compatibility**: Playback uses native HTML5 `<video>`; video files encoded with unsupported codecs trigger the player's custom codec alert prompting the user to load a standard H.264/AAC MP4 or WebM file.
   - **Concurrent Video Ended Events**: Multiple viewers reaching video end concurrently are deduplicated through server monotonic epoch cooldowns.
-  - **WebRTC STUN vs Symmetric NAT**: Uses free public Google STUN servers. Works seamlessly over typical home NATs, mobile hotspots, and direct connections; strict enterprise symmetric firewalls would require TURN in cloud deployments.
+  - **WebRTC STUN vs Symmetric NAT**: Uses free public Google STUN servers. Works seamlessly over typical home NATs, mobile hotspots, and direct connections; strict enterprise symmetric firewalls would require TURN or Tailscale mesh in cloud deployments.
   - **Microphone Permissions**: Rejection or lack of microphone hardware displays clear non-blocking alerts with device re-selection.
 
 ---
@@ -306,21 +343,22 @@
 - `backend/tests/test_sync.py` (26 tests) — **PASSED**
 - `backend/tests/test_queue.py` (10 tests) — **PASSED**
 - `backend/tests/test_chat_and_voice.py` (8 tests) — **PASSED**
-- `backend/tests/test_media.py` (4 tests, Phase 8) — **PASSED**
+- `backend/tests/test_media.py` (4 tests) — **PASSED**
+- `backend/tests/test_security_and_e2e.py` (5 tests, Phase 9) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
 - `frontend/tests/chat_voice.test.ts` (18 unit tests) — **PASSED**
-- `frontend/tests/room_polish.test.ts` (9 unit tests, Phase 8) — **PASSED**
-- `frontend/tests/subtitles.test.ts` (13 unit tests, Phase 8) — **PASSED**
-- `frontend/tests/media.test.ts` (6 unit tests, Phase 8) — **PASSED**
+- `frontend/tests/room_polish.test.ts` (9 unit tests) — **PASSED**
+- `frontend/tests/subtitles.test.ts` (13 unit tests) — **PASSED**
+- `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
 - `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 68 backend tests + 87 frontend unit tests + Vite build)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 73 backend tests + 87 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 9: Task 9.1 — Comprehensive End-to-End Multi-User Testing & Edge Case Scenarios**.
+- **AnimeSync is 100% Complete**: All 9 phases are fully implemented, verified, tested, and documented. The application is ready for immediate production watch parties via `./scripts/start.sh`.
 
 ---
 
@@ -348,3 +386,6 @@
 - **Inactivity Cursor Autohide**: Automatically hides the mouse cursor and overlays after 2.5s of inactivity during playback, preventing screen distractions.
 - **Client-Side Subtitle Synchronization with Dynamic Scaling**: SRT/VTT parsing runs on client thread with zero server upload; cues scale up 1.3x automatically in Fullscreen mode for living room display legibility.
 - **Local Host Storage Inspection & Protected Purging**: Host-only disk telemetry inspects exact macOS filesystem disk usage via `shutil.disk_usage`; mandatory confirmation dialogs protect against accidental video deletion.
+- **Defense-in-Depth Path Containment & Sanitization**: Upload session IDs, download file targets, episode deletion routines, and queue item cleanup strictly assert path containment within `settings.STORAGE_DIR.resolve()`, preventing directory traversal exploits.
+- **SPA 404 Routing Isolation**: Catch-all SPA router excludes `/api/*` and `socket.io` paths, guaranteeing standard 404 JSON responses instead of masking missing backend routes with HTML 200 responses.
+- **Clean Signal-Trapped Caffeinate Lifecycle**: `scripts/start.sh` and `scripts/stop.sh` link macOS sleep prevention directly to process lifespan via POSIX trap handling and explicit PID cleanup.

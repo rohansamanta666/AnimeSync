@@ -31,7 +31,9 @@ class StorageService:
     @staticmethod
     def get_upload_dir(upload_id: str) -> Path:
         # Prevent path traversal in upload_id
-        safe_id = re.sub(r'[^a-zA-Z0-9-]', '', upload_id)
+        safe_id = re.sub(r'[^a-zA-Z0-9-]', '', upload_id or '')
+        if not safe_id:
+            raise ValueError("Invalid or empty upload session ID")
         return Path(settings.TEMP_UPLOAD_DIR) / safe_id
 
     @staticmethod
@@ -103,6 +105,11 @@ class StorageService:
         total_chunks = metadata["total_chunks"]
         if chunk_index < 0 or chunk_index >= total_chunks:
             raise ValueError(f"Invalid chunk index {chunk_index} (total: {total_chunks})")
+
+        # Defense-in-depth: Reject abnormally large individual chunks
+        max_chunk = settings.CHUNK_SIZE_BYTES * 2
+        if len(chunk_bytes) > max_chunk:
+            raise ValueError(f"Chunk payload exceeds maximum size limit ({max_chunk} bytes)")
 
         chunk_path = StorageService.get_chunks_dir(upload_id) / f"{chunk_index}.chunk"
 

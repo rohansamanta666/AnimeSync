@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from backend.app.config import settings
 from backend.app.models.room import Room
 from backend.app.models.episode import Episode
 
@@ -112,12 +113,15 @@ class QueueManager:
 
         was_current = room and room.current_episode_id == episode_id
 
-        # Delete local file if it exists
-        if episode.file_path and os.path.exists(episode.file_path):
-            try:
-                os.remove(episode.file_path)
-            except OSError:
-                pass
+        # Delete local file if it exists and resides within storage directory
+        if episode.file_path:
+            p = Path(episode.file_path).resolve()
+            storage_root = Path(settings.STORAGE_DIR).resolve()
+            if str(p).startswith(str(storage_root)) and p.exists() and p.is_file():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
         await db.delete(episode)
         await db.flush()

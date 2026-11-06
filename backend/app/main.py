@@ -59,9 +59,17 @@ if frontend_dist.exists():
 
     @fastapi_app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        file_path = frontend_dist / full_path
-        if file_path.exists() and file_path.is_file():
-            return FileResponse(str(file_path))
+        # Do not mask non-existent API or Socket.IO routes with SPA HTML
+        if full_path.startswith("api/") or full_path == "api" or full_path.startswith("socket.io"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="API route not found")
+
+        resolved_dist = frontend_dist.resolve()
+        requested_path = (frontend_dist / full_path).resolve()
+
+        # Secure check: ensure requested file stays within frontend/dist directory
+        if requested_path.is_file() and str(requested_path).startswith(str(resolved_dist)):
+            return FileResponse(str(requested_path))
         return FileResponse(str(frontend_dist / "index.html"))
 
 # Wrap with python-socketio ASGI application

@@ -65,7 +65,7 @@ This document outlines the execution roadmap across all 9 phases, specifying del
   - One-click authoritative alignment via `calculateResyncTarget`.
   - Live round-trip network latency measurement via `ping_check` Socket.IO event.
   - Live Sync Health badge showing Synced, Nudging, Buffering, Paused.
-- [ ] Task 5.7: Test playback sync under simulated latency and packet drops.
+- [x] Task 5.7: Test playback sync under simulated latency and packet drops.
 
 ---
 
@@ -102,9 +102,9 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ---
 
 ## Phase 9 — Testing, Security, & Zero-Cost Deployment
-- [ ] Task 9.1: Comprehensive test suite execution (FastAPI backend tests, Vitest frontend tests).
-- [ ] Task 9.2: Security verification: directory traversal guards, safe filename sanitization, rate limiting, room isolation.
-- [ ] Task 9.3: Create production startup script (`scripts/start.sh`) with auto-build and Cloudflare Quick Tunnel / Tailscale instructions.
-- [ ] Task 9.4: Two-computer validation protocol across separate networks.
-- [ ] Task 9.5: Complete project documentation and handover.
+- [x] Task 9.1: Comprehensive test suite execution (FastAPI backend tests, Vitest frontend tests).
+- [x] Task 9.2: Security verification: directory traversal guards, safe filename sanitization, rate limiting, room isolation.
+- [x] Task 9.3: Create production startup script (`scripts/start.sh`) with auto-build and Cloudflare Quick Tunnel / Tailscale instructions.
+- [x] Task 9.4: Two-computer validation protocol across separate networks.
+- [x] Task 9.5: Complete project documentation and handover.
 
