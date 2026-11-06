@@ -1,10 +1,10 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 7 (Chat & WebRTC Voice System) — **COMPLETED (Tasks 7.1–7.6 Fully Completed & Verified)**
-- **Next Task**: **Phase 8 — Task 8.1: Implement Discord-Inspired Collapsible Watch-Room Sidebar**
+- **Current Phase**: Phase 8 (Watch-Room Polish & UI/UX Experience) — **IN PROGRESS (Tasks 8.1–8.4 Completed, Tasks 8.5–8.6 Pending)**
+- **Next Task**: **Phase 8 — Task 8.5: External Subtitle Support (.srt / .vtt Parser & Rendering)**
 - **Git Branch**: `main`
-- **Latest Commit**: `968a71d` (`feat(phase-7): implement real-time text chat and WebRTC voice system (tasks 7.1-7.6)`)
+- **Latest Commit**: `ea3b734` (`feat(phase-8): implement watch-room polish part 1 (tasks 8.1-8.4)`)
 - **Overall Health**: Healthy & Clean (0 failing tests, 0 TypeScript errors)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale)
@@ -22,7 +22,7 @@
 | **Phase 5** | Synchronized Video Player | **COMPLETED** | 100% |
 | **Phase 6** | Episode Queue & Auto-Next | **COMPLETED** | 100% |
 | **Phase 7** | Text Chat & WebRTC Voice | **COMPLETED** | 100% |
-| **Phase 8** | Watch-Room Polish & Customization | Pending | 0% |
+| **Phase 8** | Watch-Room Polish & Customization | **In Progress** | 50% |
 | **Phase 9** | Testing, Security & Free Deployment | Pending | 0% |
 
 ---
@@ -222,15 +222,43 @@
   - Independent peer volume slider (0% to 200%) mapping volume percent directly to Web Audio `GainNode.gain.value` (0.0 to 2.0).
   - Local peer mute toggle: allows muting the remote peer locally in headphones without disabling their microphone or affecting the anime soundtrack.
 
+### Phase 8: Watch-Room Polish & UI/UX Experience (Tasks 8.1–8.4 Completed)
+- [x] **Task 8.1: Discord-Inspired Collapsible Watch-Room Sidebar (`RoomPage.tsx`)**:
+  - Implemented collapsible communication & playlist sidebar with smooth 300ms CSS transitions.
+  - Header toggle button with dynamic icons (`PanelRightClose` / `PanelRightOpen`) and tooltips.
+  - Responsive dynamic grid layout: when sidebar is collapsed, the watch stage smoothly expands to 100% full width (`lg:col-span-1` of 1-column layout, replacing `lg:col-span-2` of 3-column layout).
+  - Floating action pill button on bottom-right when collapsed, displaying live unread chat count badges and voice speaking ripples for 1-click restore.
+  - Global keyboard shortcuts: `[` or `]` toggles sidebar collapse/expand anytime.
+- [x] **Task 8.2: Participant Profile Popover with Voice Volume Slider & Local Mute (`ParticipantProfileModal.tsx`, `RoomPage.tsx`)**:
+  - Discord-inspired modal popover triggered by clicking any participant avatar or member row.
+  - Displays avatar with gradient and online status indicator, username, host/guest role, connection status (`Online (X tabs)` / `Offline`, `Last seen`), and ready-to-watch verification badge.
+  - Remote peer controls: individual local voice volume slider ($0\%$ to $200\%$) and local peer mute toggle button (zeros out local gain without affecting peer's physical mic).
+  - Quick action: "Send Message" jumps directly to chat tab and opens sidebar.
+- [x] **Task 8.3: Fullscreen Player with Hidden Overlays & Slide-Over Communication Drawer (`VideoPlayer.tsx`, `RoomPage.tsx`)**:
+  - Fullscreen communication drawer: unobtrusive `💬 Chat & Voice` button in top video overlay opens a frosted slide-over communication drawer inside fullscreen without exiting fullscreen.
+  - Fullscreen drawer embeds ChatPanel, VoiceControlBar, and clickable member list.
+  - Inactivity cursor & controls autohide: mouse inactivity for 2.5s hides controls and sets `cursor: none`; mouse movement instantly restores controls and cursor.
+  - Auto-hide lock: when communication drawer is open, auto-hide is paused so typing and interacting with chat/voice is seamless.
+  - Theater Mode: `Tv` button in bottom controls bar and `T` keyboard shortcut expands the player stage to 98vw cinematic width.
+- [x] **Task 8.4: Keyboard Shortcuts & Cheat Sheet Modal (`KeyboardShortcutsModal.tsx`, `playerUtils.ts`, `VideoPlayer.tsx`, `RoomPage.tsx`)**:
+  - Standardized keyboard shortcut matrix:
+    - Playback: `Space` (play/pause), `← / →` (seek ±5s), `↑ / ↓` (volume ±10%), `M` (mute), `F` (fullscreen), `T` (theater mode), `Shift + R` (resync).
+    - Communication: `V` (Push-to-Talk), `C` (toggle fullscreen communication drawer).
+    - Workspace: `[` / `]` (collapse/expand sidebar), `?` (help modal), `Esc` (dismiss overlays/modals).
+  - Global shortcut listener with strict `isTypingElement` protection preventing accidental trigger when typing in chat or input fields.
+  - Japanese-aesthetic `KeyboardShortcutsModal` displaying all categorized keybindings with keyboard keycaps (`kbd`).
+
 ---
 
 ## 4. In-Progress Features
-- **Phase 7: Text Chat & WebRTC Voice System** — **COMPLETED** (Tasks 7.1–7.6 fully implemented, verified, and committed).
+- **Phase 8: Watch-Room Polish & UI/UX Experience** — Tasks 8.1–8.4 Completed (50% of Phase 8). Tasks 8.5–8.6 remaining.
 
 ---
 
 ## 5. Pending Features
-- Phase 8: Discord-inspired collapsible watch-room sidebar, participant profile popover, fullscreen autohide, external subtitles, storage cleanup.
+- Phase 8 (Remaining):
+  - Task 8.5: External subtitle support (`.srt` and `.vtt` file parser with customizable font size, color, and background).
+  - Task 8.6: Media Management Dashboard (view disk usage, inspect stored videos, and manually delete files with confirmation).
 - Phase 9: End-to-end testing, security audits, Cloudflare Quick Tunnel integration.
 
 ---
@@ -254,38 +282,22 @@
 - `backend/tests/test_ready_state.py` (8 tests) — **PASSED**
 - `backend/tests/test_sync.py` (26 tests) — **PASSED**
 - `backend/tests/test_queue.py` (10 tests) — **PASSED**
-- `backend/tests/test_chat_and_voice.py` (8 tests, Phase 7) — **PASSED**:
-  - `test_chat_service_sanitize_message_content`: Verifies stripping of HTML tags, entity encoding, length limits, and empty content rejection.
-  - `test_chat_service_create_and_get_messages`: Tests database message creation and recent message retrieval.
-  - `test_rest_messages_endpoints_lifecycle`: Tests `GET /api/rooms/{code}/messages` and `POST /api/rooms/{code}/messages` REST endpoints with auth checks.
-  - `test_socket_chat_send_and_receive`: End-to-end Socket.IO message exchange and room-wide `new_message` broadcasts.
-  - `test_socket_chat_unauthenticated_rejected`: Rejection of chat emissions from unauthenticated socket connections.
-  - `test_voice_manager_lifecycle`: Tests in-memory `VoiceManager` add, remove, mute toggle, and peer listing.
-  - `test_voice_socket_join_leave_lifecycle`: Tests Socket.IO `voice_join` and `voice_leave` signaling events.
-  - `test_voice_socket_webrtc_signaling`: Tests WebRTC signaling relay (`voice_offer`, `voice_answer`, `voice_ice_candidate`, `voice_mute_toggle`).
+- `backend/tests/test_chat_and_voice.py` (8 tests) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
-- `frontend/tests/chat_voice.test.ts` (18 unit tests, Phase 7) — **PASSED**:
-  - `RTC_CONFIG`: Free Google STUN server configuration.
-  - `getAudioConstraints`: Echo cancellation, noise suppression, AGC, and deviceId binding.
-  - `volumeToGain`: Volume percentage (0%–200%) to Web Audio Gain mapping (0.0 to 2.0).
-  - `computeAudioRms`: Audio RMS speaking detection across silence, waveforms, and empty buffers.
-  - `isTypingElement`: Input element detection for PTT key safety.
-  - `sanitizeChatMessage`: Client-side tag stripping, whitespace trimming, and null byte removal.
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,126 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 64 backend tests + 59 frontend unit tests + Vite build)
+- `frontend/tests/chat_voice.test.ts` (18 unit tests) — **PASSED**
+- `frontend/tests/room_polish.test.ts` (9 unit tests, Phase 8) — **PASSED**:
+  - `formatTime`: Edge cases (0s, NaN, negatives, seconds, mm:ss, hh:mm:ss).
+  - `isTypingElement`: Input element suppression for shortcuts.
+  - `volumeToGain`: Popover peer voice slider mapping and clamping (0%–200%).
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,129 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 64 backend tests + 68 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **Phase 8: Watch-Room Polish & UI/UX Experience**:
-  - Task 8.1: Implement Discord-inspired collapsible watch-room sidebar (participant list + chat + voice + queue).
-  - Task 8.2: Participant profile popover with individual voice volume slider and mute controls.
-  - Task 8.3: Fullscreen mode: automatically hide sidebar, chat, and queue, with cursor inactivity autohide.
-  - Task 8.4: Keyboard shortcuts: Space (play/pause), Left/Right (seek ±5s), F (fullscreen), M (mute anime), V (PTT).
-  - Task 8.5: External subtitle support: `.srt` and `.vtt` file parser with customizable font size, color, and background.
-  - Task 8.6: Media Management Dashboard: view disk usage, inspect stored videos, and manually delete files with confirmation.
+- **Phase 8: Task 8.5 — External Subtitle Support (`.srt` and `.vtt` file parser with customizable font size, color, and background)**.
 
 ---
 
@@ -308,9 +320,6 @@
 - **Free Google STUN NAT Traversal (Zero-Cost Compliance)**: Pure peer-to-peer WebRTC signaling via existing Socket.IO connection and free Google public STUN servers eliminates any need for paid TURN services.
 - **Independent Web Audio GainNode Routing**: Direct routing of remote peer streams through Web Audio API GainNode isolates voice amplification (0%–200%) and local mute completely from the native HTML5 `<video>` soundtrack.
 - **Triple-Failsafe Push-to-Talk (PTT)**: Mute on keyup, window blur, and document visibilitychange guarantees no microphone hot-mic leaks if the user switches tabs or applications while holding `V`.
-- **Typing Element Suppression for Hotkeys**: `isTypingElement` target inspection ensures that typing 'v' in chat or text inputs never activates the microphone.
-- **One-Click Manual Resync & Diagnostics**: Manual Resync hard-aligns player directly with server state while preserving paused/buffering status; live ping and drift metrics give viewers complete confidence in synchronization health.
-- **Contiguous Queue Positions & Zero-Cost Reordering**: Queue re-compacting ensures contiguous indices without gaps. Host-only authorizations protect playlist modifications.
-- **Duplicate Ended Protection with Server Monotonic Cooldown**: Multiple concurrent `playback_ended` emissions from room participants are deduplicated via server-side 15s cooldown.
-- **Strict Ready Gate Invariance on Auto-Next**: Auto-Next strictly resets participants to `WAITING_FOR_FILE`, preserving the invariant that no participant watches without verified local files.
-- **Wall-Clock Intermission Synchronization**: Intermission ticker uses wall-clock target epoch timestamps (`target_advance_time`) ensuring exact synchronization across tabs and client clocks.
+- **Typing Element Suppression for Hotkeys**: `isTypingElement` target inspection ensures that typing in chat or text inputs never activates hotkeys or microphone.
+- **In-Player Fullscreen Communication Drawer**: Slide-over frosted glass drawer inside fullscreen mode provides complete access to chat, voice, and participants without exiting fullscreen.
+- **Inactivity Cursor Autohide**: Automatically hides the mouse cursor and overlays after 2.5s of inactivity during playback, preventing screen distractions.

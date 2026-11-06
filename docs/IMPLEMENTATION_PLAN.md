@@ -92,10 +92,10 @@ This document outlines the execution roadmap across all 9 phases, specifying del
 ---
 
 ## Phase 8 — Watch-Room Polish & UI/UX Experience
-- [ ] Task 8.1: Implement Discord-inspired collapsible watch-room sidebar (participant list + chat).
-- [ ] Task 8.2: Participant profile popover with individual voice volume slider and mute controls.
-- [ ] Task 8.3: Fullscreen mode: automatically hide sidebar, chat, and queue, with cursor inactivity autohide.
-- [ ] Task 8.4: Keyboard shortcuts: Space (play/pause), Left/Right (seek $\pm 5$s), F (fullscreen), M (mute anime), V (PTT).
+- [x] Task 8.1: Implement Discord-inspired collapsible watch-room sidebar (participant list + chat).
+- [x] Task 8.2: Participant profile popover with individual voice volume slider and mute controls.
+- [x] Task 8.3: Fullscreen mode: automatically hide sidebar, chat, and queue, with cursor inactivity autohide.
+- [x] Task 8.4: Keyboard shortcuts: Space (play/pause), Left/Right (seek $\pm 5$s), F (fullscreen), M (mute anime), V (PTT).
 - [ ] Task 8.5: External subtitle support: `.srt` and `.vtt` file parser with customizable font size, color, and background.
 - [ ] Task 8.6: Media Management Dashboard: view disk usage, inspect stored videos, and manually delete files with confirmation.
 

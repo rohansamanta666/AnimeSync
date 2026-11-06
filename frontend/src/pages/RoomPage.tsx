@@ -18,6 +18,9 @@ import {
   Radio,
   Mic,
   MicOff,
+  PanelRightClose,
+  PanelRightOpen,
+  Keyboard,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
@@ -41,6 +44,9 @@ import { useChat } from '../hooks/useChat';
 import { useWebRTCVoice } from '../hooks/useWebRTCVoice';
 import { ChatPanel } from '../components/chat/ChatPanel';
 import { VoiceControlBar } from '../components/voice/VoiceControlBar';
+import { ParticipantProfileModal } from '../components/room/ParticipantProfileModal';
+import { KeyboardShortcutsModal } from '../components/room/KeyboardShortcutsModal';
+import { isTypingElement } from '../services/webrtc';
 
 export const RoomPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
@@ -225,6 +231,40 @@ export const RoomPage: React.FC = () => {
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const prevMsgCountRef = useRef<number>(0);
 
+  // Phase 8: Collapsible Sidebar, Theater Mode & Modals
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isTheaterMode, setIsTheaterMode] = useState<boolean>(false);
+  const [selectedProfileParticipant, setSelectedProfileParticipant] =
+    useState<ParticipantPresence | null>(null);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
+
+  // Phase 8: Global Keyboard Shortcuts
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (isTypingElement(e.target)) return;
+
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowShortcutsModal((prev) => !prev);
+      } else if (e.key === '[' || e.key === ']') {
+        e.preventDefault();
+        setIsSidebarCollapsed((prev) => !prev);
+      } else if (e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        setIsTheaterMode((prev) => {
+          const next = !prev;
+          if (next) {
+            setIsSidebarCollapsed(true);
+          }
+          return next;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'chat') {
       setUnreadMessages(0);
@@ -340,8 +380,144 @@ export const RoomPage: React.FC = () => {
     episodeList[0] ||
     null;
 
+  // Phase 8 Task 8.3: Fullscreen Communication Drawer Content
+  const fullscreenCommunicationContent = (
+    <div className="flex flex-col h-full space-y-3">
+      {/* Tabs Switcher in Fullscreen */}
+      <div className="flex items-center p-1 bg-void-900 border border-void-700/80 rounded-xl gap-1 shrink-0">
+        <button
+          onClick={() => {
+            setActiveTab('chat');
+            setUnreadMessages(0);
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+            activeTab === 'chat'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-ink-muted hover:text-white hover:bg-void-800'
+          }`}
+        >
+          <MessageSquare className="w-3.5 h-3.5" />
+          <span>Chat</span>
+          {unreadMessages > 0 && (
+            <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('voice')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+            activeTab === 'voice'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-ink-muted hover:text-white hover:bg-void-800'
+          }`}
+        >
+          <Radio className="w-3.5 h-3.5" />
+          <span>Voice</span>
+          {isInVoice && (
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isSpeaking || Object.values(peerSpeakingMap).some(Boolean)
+                  ? 'bg-emerald-400 ring-2 ring-emerald-400/50 animate-pulse'
+                  : 'bg-emerald-400'
+              }`}
+            />
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('members')}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+            activeTab === 'members'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-ink-muted hover:text-white hover:bg-void-800'
+          }`}
+        >
+          <Users className="w-3.5 h-3.5" />
+          <span>Members</span>
+        </button>
+      </div>
+
+      {/* Tab Panels in Fullscreen */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {activeTab === 'chat' && (
+          <ChatPanel
+            messages={messages}
+            onSendMessage={sendMessage}
+            currentParticipantId={auth?.participant_id}
+            hostParticipantId={room.host_id}
+            isLoading={isChatLoading}
+            className="h-full border-0 bg-transparent p-0"
+          />
+        )}
+        {activeTab === 'voice' && (
+          <VoiceControlBar
+            isInVoice={isInVoice}
+            isMuted={isMuted}
+            voiceMode={voiceMode}
+            isPttActive={isPttActive}
+            isSpeaking={isSpeaking}
+            peerSpeakingMap={peerSpeakingMap}
+            voicePeers={voicePeers}
+            audioDevices={audioDevices}
+            selectedDeviceId={selectedDeviceId}
+            onDeviceChange={setSelectedDeviceId}
+            peerVolume={peerVolume}
+            onPeerVolumeChange={setPeerVolume}
+            isPeerMutedLocally={isPeerMutedLocally}
+            onTogglePeerMuteLocally={() => setIsPeerMutedLocally(!isPeerMutedLocally)}
+            permissionError={permissionError}
+            onClearPermissionError={clearPermissionError}
+            onJoinVoice={joinVoice}
+            onLeaveVoice={leaveVoice}
+            onToggleMute={toggleMute}
+            onSetVoiceMode={setVoiceMode}
+            className="border-0 bg-transparent p-0"
+          />
+        )}
+        {activeTab === 'members' && (
+          <div className="space-y-2">
+            {activeParticipants.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => setSelectedProfileParticipant(p)}
+                className="flex items-center justify-between p-2.5 rounded-xl bg-void-900/80 border border-void-700/60 cursor-pointer hover:border-violet-500/50 transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-violet-600 to-pink-600 flex items-center justify-center font-bold text-xs text-white">
+                      {p.username.charAt(0).toUpperCase()}
+                    </div>
+                    <span
+                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-void-900 ${
+                        p.is_online ? 'bg-emerald-400' : 'bg-void-600'
+                      }`}
+                    />
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-white flex items-center gap-1">
+                      <span>{p.username}</span>
+                      {p.is_host && (
+                        <span className="text-[8px] font-mono uppercase bg-violet-950 text-violet-400 px-1 py-0.2 rounded border border-violet-800">
+                          Host
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-ink-dim font-mono">
+                      {p.id === auth?.participant_id ? '(You)' : 'Peer'}
+                    </span>
+                  </div>
+                </div>
+                <Badge status={p.status} size="sm" />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className={`${isTheaterMode ? 'max-w-[98vw]' : 'max-w-7xl'} mx-auto px-4 sm:px-6 py-6 space-y-6 transition-all duration-300`}>
       {/* Real-time Socket Error Notice */}
       {socketError && (
         <div className="flex items-center justify-between p-4 rounded-xl bg-rose-950/80 border border-rose-800 text-rose-200 text-xs">
@@ -478,13 +654,40 @@ export const RoomPage: React.FC = () => {
           >
             {copied ? 'Link Copied!' : 'Copy Invite Link'}
           </Button>
+
+          {/* Phase 8 Task 8.4: Keyboard Shortcuts Trigger */}
+          <button
+            onClick={() => setShowShortcutsModal(true)}
+            className="p-2 rounded-xl bg-void-900 border border-void-700 text-ink-muted hover:text-white hover:border-violet-500/50 transition-colors"
+            title="Keyboard Shortcuts (?)"
+          >
+            <Keyboard className="w-4 h-4" />
+          </button>
+
+          {/* Phase 8 Task 8.1: Sidebar Collapse / Expand Toggle */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            leftIcon={
+              isSidebarCollapsed ? (
+                <PanelRightOpen className="w-4 h-4 text-violet-400" />
+              ) : (
+                <PanelRightClose className="w-4 h-4 text-ink-muted" />
+              )
+            }
+            title={isSidebarCollapsed ? 'Expand Sidebar (])' : 'Collapse Sidebar ([)'}
+            className="text-xs h-8"
+          >
+            <span className="hidden md:inline">{isSidebarCollapsed ? 'Sidebar' : 'Collapse'}</span>
+          </Button>
         </div>
       </div>
 
       {/* Main Room Layout Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Watch Stage & Verification Area (2 Cols) */}
-        <div className="lg:col-span-2 space-y-6">
+      <div className={`grid grid-cols-1 ${isSidebarCollapsed ? 'lg:grid-cols-1' : 'lg:grid-cols-3'} gap-6 transition-all duration-300 relative`}>
+        {/* Watch Stage & Verification Area */}
+        <div className={`${isSidebarCollapsed ? 'lg:col-span-1' : 'lg:col-span-2'} space-y-6 transition-all duration-300`}>
           {/* Phase 6: Queue Finished Notice */}
           {isQueueFinished && (
             <div className="flex items-center justify-between p-4 rounded-xl bg-violet-950/80 border border-violet-700 text-white shadow-xl animate-in fade-in duration-200">
@@ -540,6 +743,16 @@ export const RoomPage: React.FC = () => {
                 latencyMs={latencyMs}
                 driftSeconds={driftSeconds}
                 onEnded={handleVideoEnded}
+                isTheaterMode={isTheaterMode}
+                onToggleTheaterMode={() => {
+                  const next = !isTheaterMode;
+                  setIsTheaterMode(next);
+                  if (next) {
+                    setIsSidebarCollapsed(true);
+                  }
+                }}
+                fullscreenOverlay={fullscreenCommunicationContent}
+                unreadCount={unreadMessages}
               />
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
@@ -681,9 +894,24 @@ export const RoomPage: React.FC = () => {
         </div>
 
         {/* Sidebar: Chat, Voice, Episode Queue & Participants (1 Col) */}
-        <div className="space-y-4">
-          {/* Sidebar Tabs Switcher */}
-          <div className="flex items-center p-1 bg-void-900 border border-void-700/80 rounded-xl gap-1">
+        {!isSidebarCollapsed ? (
+          <div className="space-y-4 animate-in fade-in duration-200">
+            {/* Sidebar Title & Collapse Button */}
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs font-mono font-bold text-ink-muted uppercase tracking-wider">
+                Watch Party Sidebar
+              </span>
+              <button
+                onClick={() => setIsSidebarCollapsed(true)}
+                className="p-1 rounded-lg text-ink-muted hover:text-white hover:bg-void-800 transition-colors"
+                title="Collapse Sidebar ([)"
+              >
+                <PanelRightClose className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Sidebar Tabs Switcher */}
+            <div className="flex items-center p-1 bg-void-900 border border-void-700/80 rounded-xl gap-1">
             <button
               onClick={() => {
                 setActiveTab('chat');
@@ -832,12 +1060,14 @@ export const RoomPage: React.FC = () => {
                   {activeParticipants.map((p) => (
                     <div
                       key={p.id}
-                      className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60 transition-all duration-200"
+                      onClick={() => setSelectedProfileParticipant(p)}
+                      className="flex items-center justify-between p-3 rounded-xl bg-void-900/90 border border-void-700/60 hover:border-violet-500/50 cursor-pointer transition-all duration-200 group/member"
+                      title="Click to view profile & adjust voice volume"
                     >
                       <div className="flex items-center gap-3">
                         {/* Avatar with Online Pulse Indicator */}
                         <div className="relative">
-                          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white shadow-sm">
+                          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600/40 to-pink-600/40 border border-violet-500/30 flex items-center justify-center font-bold text-xs text-white shadow-sm group-hover/member:border-violet-400/60 transition-colors">
                             {p.username.charAt(0).toUpperCase()}
                           </div>
                           <span
@@ -850,7 +1080,7 @@ export const RoomPage: React.FC = () => {
 
                         <div>
                           <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-medium text-white">{p.username}</span>
+                            <span className="text-sm font-medium text-white group-hover/member:text-violet-300 transition-colors">{p.username}</span>
                             {p.is_host && (
                               <span className="text-[9px] font-mono uppercase bg-violet-950 text-violet-400 px-1.5 py-0.2 rounded border border-violet-800">
                                 Host
@@ -897,6 +1127,29 @@ export const RoomPage: React.FC = () => {
             </>
           )}
         </div>
+      ) : (
+        /* Phase 8 Task 8.1: Floating rail trigger when sidebar is collapsed */
+        <div className="fixed right-4 bottom-8 z-30 flex items-center gap-2 animate-in slide-in-from-right duration-200">
+          <button
+            onClick={() => setIsSidebarCollapsed(false)}
+            className="flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-void-900/90 hover:bg-void-800 border border-violet-500/50 text-white shadow-2xl backdrop-blur-md hover:scale-105 transition-all group"
+            title="Expand Sidebar (])"
+          >
+            <PanelRightOpen className="w-4 h-4 text-violet-400 group-hover:text-violet-300" />
+            <span className="text-xs font-semibold">Sidebar</span>
+            {unreadMessages > 0 && (
+              <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+            )}
+            {isInVoice && (
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isSpeaking ? 'bg-emerald-400 ring-2 ring-emerald-400/50 animate-pulse' : 'bg-emerald-400'
+                }`}
+              />
+            )}
+          </button>
+        </div>
+      )}
       </div>
 
       {/* Upload Modal (Host Only) */}
@@ -947,6 +1200,31 @@ export const RoomPage: React.FC = () => {
           onDismiss={acknowledgePlayback}
         />
       )}
+
+      {/* Phase 8 Task 8.2: Participant Profile & Voice Volume Popover */}
+      <ParticipantProfileModal
+        isOpen={!!selectedProfileParticipant}
+        onClose={() => setSelectedProfileParticipant(null)}
+        participant={selectedProfileParticipant}
+        isSelf={selectedProfileParticipant?.id === auth?.participant_id}
+        isInVoice={isInVoice}
+        isPeerInVoice={voicePeers.some((p) => p.participant_id === selectedProfileParticipant?.id)}
+        isSpeaking={selectedProfileParticipant ? !!peerSpeakingMap[selectedProfileParticipant.id] : false}
+        peerVolume={peerVolume}
+        onPeerVolumeChange={setPeerVolume}
+        isPeerMutedLocally={isPeerMutedLocally}
+        onTogglePeerMuteLocally={() => setIsPeerMutedLocally(!isPeerMutedLocally)}
+        onOpenChat={() => {
+          setActiveTab('chat');
+          setIsSidebarCollapsed(false);
+        }}
+      />
+
+      {/* Phase 8 Task 8.4: Keyboard Shortcuts Help Modal */}
+      <KeyboardShortcutsModal
+        isOpen={showShortcutsModal}
+        onClose={() => setShowShortcutsModal(false)}
+      />
     </div>
   );
 };

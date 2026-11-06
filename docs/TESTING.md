@@ -122,6 +122,10 @@ Located in `frontend/tests/`:
   - `computeAudioRms`: Audio RMS speaking detection across silence, active waveforms, and empty buffers.
   - `isTypingElement`: Input element detection for PTT key 'V' safety.
   - `sanitizeChatMessage`: Client-side tag stripping, whitespace trimming, and null byte removal.
+- **`room_polish.test.ts`** (9 unit tests, Tasks 8.1 – 8.4):
+  - `formatTime`: validates player timestamp formatting across zero, negative, NaN, sub-minute, mm:ss, and hh:mm:ss durations.
+  - `isTypingElement`: verifies shortcut key suppression when typing in text inputs, textareas, selects, and contentEditable elements.
+  - `volumeToGain`: validates profile popover peer voice volume slider (0% to 200%) and boundary clamping.
 
 ---
 

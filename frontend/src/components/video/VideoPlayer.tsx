@@ -36,10 +36,15 @@ import {
   AlertCircle,
   SlidersHorizontal,
   RefreshCw,
+  Tv,
+  MessageSquare,
+  X,
 } from 'lucide-react';
 import { Button } from '../common/Button';
 import { SyncHealthBadge } from './SyncHealthBadge';
 import { SyncStatusState } from '../../services/drift';
+import { isTypingElement } from '../../services/webrtc';
+import { formatTime } from '../../services/playerUtils';
 
 export interface VideoPlayerHandle {
   play: () => Promise<void>;
@@ -80,26 +85,16 @@ export interface VideoPlayerProps {
   syncStatus?: SyncStatusState;
   latencyMs?: number | null;
   driftSeconds?: number;
+  /** Phase 8: Theater Mode & Fullscreen Communication Overlay */
+  isTheaterMode?: boolean;
+  onToggleTheaterMode?: () => void;
+  fullscreenOverlay?: React.ReactNode;
+  unreadCount?: number;
   /** Custom outer container class */
   className?: string;
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-
-function formatTime(seconds: number): string {
-  if (isNaN(seconds) || seconds < 0) return '0:00';
-  const totalSecs = Math.floor(seconds);
-  const hrs = Math.floor(totalSecs / 3600);
-  const mins = Math.floor((totalSecs % 3600) / 60);
-  const secs = totalSecs % 60;
-
-  const paddedSecs = secs.toString().padStart(2, '0');
-  if (hrs > 0) {
-    const paddedMins = mins.toString().padStart(2, '0');
-    return `${hrs}:${paddedMins}:${paddedSecs}`;
-  }
-  return `${mins}:${paddedSecs}`;
-}
 
 export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
   (
@@ -124,6 +119,10 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       syncStatus,
       latencyMs,
       driftSeconds,
+      isTheaterMode = false,
+      onToggleTheaterMode,
+      fullscreenOverlay,
+      unreadCount = 0,
       className = '',
     },
     ref
@@ -149,6 +148,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [isBuffering, setIsBuffering] = useState(false);
     const [codecError, setCodecError] = useState<string | null>(null);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+    const [showFullscreenDrawer, setShowFullscreenDrawer] = useState(false);
     const [actionIndicator, setActionIndicator] = useState<'play' | 'pause' | null>(null);
 
     // 1. Create and revoke object URL safely
@@ -173,7 +173,11 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     // 2. Fullscreen change listener
     useEffect(() => {
       const handleFullscreenChange = () => {
-        setIsFullscreen(!!document.fullscreenElement);
+        const inFs = !!document.fullscreenElement;
+        setIsFullscreen(inFs);
+        if (!inFs) {
+          setShowFullscreenDrawer(false);
+        }
       };
       document.addEventListener('fullscreenchange', handleFullscreenChange);
       return () => {
@@ -187,16 +191,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
       }
-      if (isPlaying) {
+      if (isPlaying && !showFullscreenDrawer) {
         hideTimeoutRef.current = setTimeout(() => {
           setControlsVisible(false);
           setShowSpeedMenu(false);
         }, 2500);
       }
-    }, [isPlaying]);
+    }, [isPlaying, showFullscreenDrawer]);
 
     useEffect(() => {
-      if (!isPlaying) {
+      if (!isPlaying || showFullscreenDrawer) {
         setControlsVisible(true);
         if (hideTimeoutRef.current) {
           clearTimeout(hideTimeoutRef.current);
@@ -209,7 +213,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           clearTimeout(hideTimeoutRef.current);
         }
       };
-    }, [isPlaying, resetHideTimer]);
+    }, [isPlaying, showFullscreenDrawer, resetHideTimer]);
 
     // 4. Imperative handle for Phase 5 sync engine
     useImperativeHandle(
@@ -349,9 +353,8 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     // 6. Keyboard shortcuts
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLDivElement>) => {
-        // Prevent default for video control keys
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+        // Prevent default for video control keys if typing in text elements
+        if (isTypingElement(e.target)) return;
 
         switch (e.code) {
           case 'Space':
@@ -382,6 +385,24 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             e.preventDefault();
             toggleFullscreen();
             break;
+          case 'KeyT':
+            if (onToggleTheaterMode) {
+              e.preventDefault();
+              onToggleTheaterMode();
+            }
+            break;
+          case 'KeyC':
+            if (fullscreenOverlay) {
+              e.preventDefault();
+              setShowFullscreenDrawer((prev) => !prev);
+            }
+            break;
+          case 'Escape':
+            if (showFullscreenDrawer) {
+              e.preventDefault();
+              setShowFullscreenDrawer(false);
+            }
+            break;
           case 'KeyR':
             if (e.shiftKey && onResync) {
               e.preventDefault();
@@ -392,7 +413,16 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             break;
         }
       },
-      [togglePlay, currentTime, volume, duration, onResync]
+      [
+        togglePlay,
+        currentTime,
+        volume,
+        duration,
+        onResync,
+        onToggleTheaterMode,
+        fullscreenOverlay,
+        showFullscreenDrawer,
+      ]
     );
 
     // 7. Progress scrubber click / drag
@@ -493,7 +523,9 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             setShowSpeedMenu(false);
           }
         }}
-        className={`relative aspect-video bg-black rounded-2xl overflow-hidden select-none outline-none group border border-void-700/60 shadow-2xl ${className}`}
+        className={`relative aspect-video bg-black rounded-2xl overflow-hidden select-none outline-none group border border-void-700/60 shadow-2xl ${
+          !controlsVisible && isPlaying && !showFullscreenDrawer ? 'cursor-none' : ''
+        } ${className}`}
       >
         {/* HTML5 Video Element */}
         <video
@@ -622,17 +654,41 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </span>
           </div>
 
-          {/* Sync Health Badge in Top Overlay */}
-          {syncStatus && onResync && (
-            <SyncHealthBadge
-              status={syncStatus}
-              driftSeconds={driftSeconds ?? 0}
-              latencyMs={latencyMs ?? null}
-              isResyncing={!!isResyncing}
-              onResync={onResync}
-              compact
-            />
-          )}
+          <div className="flex items-center gap-3">
+            {/* Phase 8 Task 8.3: Fullscreen Communication Drawer Toggle */}
+            {fullscreenOverlay && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowFullscreenDrawer(!showFullscreenDrawer);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-all border ${
+                  showFullscreenDrawer
+                    ? 'bg-violet-600 text-white border-violet-500 shadow-sm'
+                    : 'bg-void-900/80 text-ink-muted hover:text-white border-void-700/80 hover:bg-void-800'
+                }`}
+                title="Toggle Communication Drawer (C)"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-violet-400" />
+                <span className="hidden sm:inline">Chat & Voice</span>
+                {unreadCount > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-pink-500 animate-pulse" />
+                )}
+              </button>
+            )}
+
+            {/* Sync Health Badge in Top Overlay */}
+            {syncStatus && onResync && (
+              <SyncHealthBadge
+                status={syncStatus}
+                driftSeconds={driftSeconds ?? 0}
+                latencyMs={latencyMs ?? null}
+                isResyncing={!!isResyncing}
+                onResync={onResync}
+                compact
+              />
+            )}
+          </div>
         </div>
 
         {/* Bottom Custom Controls Overlay (Auto-hides) */}
@@ -788,6 +844,21 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
                 </button>
               )}
 
+              {/* Theater Mode Button */}
+              {onToggleTheaterMode && (
+                <button
+                  onClick={onToggleTheaterMode}
+                  className={`p-1.5 rounded-lg transition-colors ${
+                    isTheaterMode
+                      ? 'bg-violet-600/30 text-violet-300 border border-violet-500/40'
+                      : 'hover:bg-white/10 text-ink-muted hover:text-white'
+                  }`}
+                  title={isTheaterMode ? 'Exit Theater Mode (T)' : 'Theater Mode (T)'}
+                >
+                  <Tv className="w-4 h-4" />
+                </button>
+              )}
+
               {/* Fullscreen Button */}
               <button
                 onClick={toggleFullscreen}
@@ -799,6 +870,33 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             </div>
           </div>
         </div>
+
+        {/* Phase 8 Task 8.3: Fullscreen Communication Slide-Over Drawer */}
+        {showFullscreenDrawer && fullscreenOverlay && (
+          <div
+            className="absolute top-0 right-0 bottom-0 w-80 sm:w-96 z-40 bg-void-950/95 backdrop-blur-md border-l border-void-700/80 shadow-2xl flex flex-col p-4 animate-in slide-in-from-right duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 mb-3 border-b border-void-700/60 shrink-0">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-4 h-4 text-violet-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider">
+                  Watch Party Overlay
+                </span>
+              </div>
+              <button
+                onClick={() => setShowFullscreenDrawer(false)}
+                className="p-1.5 rounded-lg text-ink-muted hover:text-white hover:bg-void-800 transition-colors"
+                title="Close Drawer (C or Esc)"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+              {fullscreenOverlay}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
