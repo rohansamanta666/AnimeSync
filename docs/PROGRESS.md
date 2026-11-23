@@ -4,8 +4,8 @@
 - **Current Phase**: Phase 9 (Final Testing, Security & Zero-Cost Deployment) — **COMPLETED (100%)**
 - **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
 - **Git Branch**: `main`
-- **Latest Commit**: `bdbd5ae` (`feat(deployment): enhance start script with --tunnel flag, dynamic cloudflare CORS support, and documentation`)
-- **Overall Health**: 100% Healthy & Clean (0 failing tests, 73 backend tests passing, 87 frontend tests passing, 0 TypeScript errors, Vite production build successful)
+- **Latest Commit**: Checkpoint commit for mobile playback sync & unobtrusive buffering indicator
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 73 backend tests passing, 96 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
@@ -352,8 +352,9 @@
 - `frontend/tests/room_polish.test.ts` (9 unit tests) — **PASSED**
 - `frontend/tests/subtitles.test.ts` (13 unit tests) — **PASSED**
 - `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
+- `frontend/tests/playback_sync_fixes.test.ts` (9 unit tests) — **PASSED**
 - `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 73 backend tests + 87 frontend unit tests + Vite build)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 73 backend tests + 96 frontend unit tests + Vite build)
 
 ---
 

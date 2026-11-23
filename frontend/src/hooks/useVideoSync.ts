@@ -425,7 +425,9 @@ export function useVideoSync({
         const targetRate = incomingRate;
 
         if (action === 'PLAY') {
-          if (typeof targetTime === 'number' && !isNaN(targetTime)) {
+          const current = player.getCurrentTime();
+          // Only seek if local time is significantly desynced (> 0.4s) to avoid decoder flush/waiting spikes
+          if (typeof targetTime === 'number' && !isNaN(targetTime) && Math.abs(current - targetTime) > 0.4) {
             player.seek(targetTime);
           }
           if (typeof targetRate === 'number' && !isNaN(targetRate)) {
@@ -439,6 +441,11 @@ export function useVideoSync({
             player.seek(targetTime);
           }
           player.pause();
+          // If paused intentionally (not for buffering), clear any room buffering hold
+          if (data.reason !== 'buffering') {
+            setIsRoomBuffering(false);
+            setBufferingParticipants([]);
+          }
         } else if (action === 'SEEK') {
           if (typeof targetTime === 'number' && !isNaN(targetTime)) {
             player.seek(targetTime);

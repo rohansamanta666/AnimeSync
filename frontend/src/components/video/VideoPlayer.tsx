@@ -59,7 +59,7 @@ import {
 } from '../../services/subtitles';
 
 export interface VideoPlayerHandle {
-  play: () => Promise<void>;
+  play: () => Promise<boolean | void>;
   pause: () => void;
   seek: (seconds: number) => void;
   setPlaybackRate: (rate: number) => void;
@@ -158,10 +158,50 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [controlsVisible, setControlsVisible] = useState(true);
     const [isBuffering, setIsBuffering] = useState(false);
+    const [needsUserInteraction, setNeedsUserInteraction] = useState(false);
+    const bufferingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [codecError, setCodecError] = useState<string | null>(null);
     const [showSpeedMenu, setShowSpeedMenu] = useState(false);
     const [showFullscreenDrawer, setShowFullscreenDrawer] = useState(false);
     const [actionIndicator, setActionIndicator] = useState<'play' | 'pause' | null>(null);
+
+    // Buffering debounce & clear logic (Problem 1: avoid flickering and blocking overlays)
+    const clearBuffering = useCallback(() => {
+      if (bufferingTimeoutRef.current) {
+        clearTimeout(bufferingTimeoutRef.current);
+        bufferingTimeoutRef.current = null;
+      }
+      setIsBuffering(false);
+      onBufferingEnd?.();
+    }, [onBufferingEnd]);
+
+    const triggerBuffering = useCallback(() => {
+      const video = videoRef.current;
+      // Do not show or emit buffering if video is paused intentionally
+      if (!video || video.paused) {
+        clearBuffering();
+        return;
+      }
+      if (bufferingTimeoutRef.current) return;
+
+      // 300ms debounce to avoid flickering and false buffering alerts during brief seek/sync adjustments
+      bufferingTimeoutRef.current = setTimeout(() => {
+        const v = videoRef.current;
+        if (v && !v.paused && v.readyState < 3) {
+          setIsBuffering(true);
+          onBufferingStart?.();
+        }
+        bufferingTimeoutRef.current = null;
+      }, 300);
+    }, [clearBuffering, onBufferingStart]);
+
+    useEffect(() => {
+      return () => {
+        if (bufferingTimeoutRef.current) {
+          clearTimeout(bufferingTimeoutRef.current);
+        }
+      };
+    }, []);
 
     // Phase 8 Task 8.5: External Subtitles State
     const subtitleInputRef = useRef<HTMLInputElement | null>(null);
@@ -279,15 +319,25 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       ref,
       () => ({
         play: async () => {
-          if (videoRef.current) {
-            isRemoteActionRef.current = true;
-            try {
-              await videoRef.current.play();
-            } finally {
-              setTimeout(() => {
-                isRemoteActionRef.current = false;
-              }, 120);
+          if (!videoRef.current) return false;
+          isRemoteActionRef.current = true;
+          try {
+            await videoRef.current.play();
+            setNeedsUserInteraction(false);
+            return true;
+          } catch (err: any) {
+            // Mobile browser compatibility: capture autoplay rejection and prompt for interaction
+            if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
+              console.warn('Playback blocked by browser autoplay policy (user interaction required):', err);
+              setNeedsUserInteraction(true);
+            } else {
+              console.warn('Playback error:', err);
             }
+            return false;
+          } finally {
+            setTimeout(() => {
+              isRemoteActionRef.current = false;
+            }, 120);
           }
         },
         pause: () => {
@@ -295,6 +345,7 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
             isRemoteActionRef.current = true;
             try {
               videoRef.current.pause();
+              setNeedsUserInteraction(false);
             } finally {
               setTimeout(() => {
                 isRemoteActionRef.current = false;
@@ -341,9 +392,14 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
       const video = videoRef.current;
       if (!video) return;
 
+      setNeedsUserInteraction(false);
+
       if (video.paused) {
-        video.play().catch((err) => {
+        video.play().catch((err: any) => {
           console.warn('Playback initiation failed:', err);
+          if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') {
+            setNeedsUserInteraction(true);
+          }
         });
         flashIndicator('play');
       } else {
@@ -351,6 +407,21 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
         flashIndicator('pause');
       }
     }, []);
+
+    const handleUserInteractionPlay = async (e: React.SyntheticEvent) => {
+      e.stopPropagation();
+      const video = videoRef.current;
+      if (!video) return;
+      setNeedsUserInteraction(false);
+      try {
+        await video.play();
+        if (!isRemoteActionRef.current) {
+          onPlay?.();
+        }
+      } catch (err) {
+        console.warn('User interaction play initiation failed:', err);
+      }
+    };
 
     const handleSeek = (newTime: number) => {
       const video = videoRef.current;
@@ -607,13 +678,15 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onDoubleClick={toggleFullscreen}
           onPlay={() => {
             setIsPlaying(true);
-            setIsBuffering(false);
+            clearBuffering();
+            setNeedsUserInteraction(false);
             if (!isRemoteActionRef.current) {
               onPlay?.();
             }
           }}
           onPause={() => {
             setIsPlaying(false);
+            clearBuffering();
             if (!isRemoteActionRef.current) {
               onPause?.();
             }
@@ -621,45 +694,64 @@ export const VideoPlayer = forwardRef<VideoPlayerHandle, VideoPlayerProps>(
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onWaiting={() => {
-            setIsBuffering(true);
+            triggerBuffering();
             onWaiting?.();
-            onBufferingStart?.();
           }}
           onStalled={() => {
-            setIsBuffering(true);
-            onBufferingStart?.();
+            // Check if video is truly stalled during active playback
+            const v = videoRef.current;
+            if (v && !v.paused && v.readyState < 3) {
+              triggerBuffering();
+            }
           }}
           onCanPlay={() => {
-            setIsBuffering(false);
-            onBufferingEnd?.();
+            clearBuffering();
           }}
           onPlaying={() => {
-            setIsBuffering(false);
+            setIsPlaying(true);
+            clearBuffering();
+            setNeedsUserInteraction(false);
             onPlaying?.();
-            onBufferingEnd?.();
           }}
           onEnded={() => {
             setIsPlaying(false);
+            clearBuffering();
             onEnded?.();
           }}
           onError={handleVideoError}
           playsInline
         />
 
-        {/* Buffering spinner overlay */}
-        {(isBuffering || (bufferingParticipants && bufferingParticipants.length > 0)) && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none bg-black/60 backdrop-blur-sm z-20 transition-all">
-            <div className="w-14 h-14 rounded-full border-3 border-violet-500 border-t-transparent animate-spin mb-3 shadow-lg" />
-            <div className="text-center px-4 py-2 rounded-xl bg-void-950/80 border border-void-700/80 shadow-2xl">
-              <p className="text-xs font-mono font-bold text-violet-300">
-                {bufferingParticipants && bufferingParticipants.length > 0
-                  ? `Buffering: ${bufferingParticipants.join(', ')}`
-                  : 'Buffering video...'}
-              </p>
-              <p className="text-[10px] font-mono text-ink-muted mt-0.5">
-                Playback will resume automatically once all viewers are ready
-              </p>
-            </div>
+        {/* Buffering Indicator: Unobtrusive, non-blocking, keeps video visible (Problem 1) */}
+        {/* 1. Subtle central spinner for local buffering (no dark backdrop or blur) */}
+        {isBuffering && isPlaying && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20 transition-opacity duration-200">
+            <div className="w-10 h-10 rounded-full border-2 border-violet-400 border-t-transparent animate-spin drop-shadow-[0_0_10px_rgba(167,139,250,0.7)]" />
+          </div>
+        )}
+
+        {/* 2. Compact bottom-corner pill when room/peer is buffering */}
+        {bufferingParticipants && bufferingParticipants.length > 0 && !videoRef.current?.paused && (
+          <div className="absolute bottom-16 left-4 z-20 pointer-events-none flex items-center gap-2 px-3 py-1.5 rounded-full bg-void-950/85 border border-violet-500/40 shadow-xl backdrop-blur-md transition-all duration-200">
+            <div className="w-3.5 h-3.5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+            <span className="text-xs font-mono font-medium text-violet-200">
+              Buffering: {bufferingParticipants.join(', ')}
+            </span>
+          </div>
+        )}
+
+        {/* Mobile Autoplay / User Interaction Prompt (Problem 2) */}
+        {needsUserInteraction && (
+          <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-auto">
+            <button
+              type="button"
+              onClick={handleUserInteractionPlay}
+              onTouchEnd={handleUserInteractionPlay}
+              className="flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-violet-600/95 hover:bg-violet-500 text-white font-medium text-sm shadow-2xl backdrop-blur-md border border-violet-400/50 transition-all transform hover:scale-105 active:scale-95 animate-pulse cursor-pointer"
+            >
+              <Play className="w-4 h-4 fill-white" />
+              <span>Tap to start playback</span>
+            </button>
           </div>
         )}
 

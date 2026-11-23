@@ -41,6 +41,8 @@ storage/videos/*
 !storage/videos/.gitkeep
 storage/uploads_temp/*
 !storage/uploads_temp/.gitkeep
+storage/*.log
+*.log
 
 # SQLite database
 *.sqlite3
