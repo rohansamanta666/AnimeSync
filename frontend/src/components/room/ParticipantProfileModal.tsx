@@ -8,7 +8,7 @@
  * - Local peer mute toggle (does not affect peer's microphone)
  * - Quick jump to Chat
  */
-import React from 'react';
+import React, { useState } from 'react';
 import {
   X,
   Shield,
@@ -17,6 +17,8 @@ import {
   MessageSquare,
   Radio,
   Clock,
+  UserX,
+  AlertTriangle,
 } from 'lucide-react';
 import { ParticipantPresence } from '../../types';
 import { Badge } from '../common/Badge';
@@ -27,6 +29,8 @@ export interface ParticipantProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   isSelf: boolean;
+  isHost?: boolean;
+  onKickParticipant?: (participantId: string) => void;
   // Voice controls for the remote peer
   isInVoice?: boolean;
   isPeerInVoice?: boolean;
@@ -43,6 +47,8 @@ export const ParticipantProfileModal: React.FC<ParticipantProfileModalProps> = (
   isOpen,
   onClose,
   isSelf,
+  isHost = false,
+  onKickParticipant,
   isInVoice = false,
   isPeerInVoice = false,
   isSpeaking = false,
@@ -52,6 +58,8 @@ export const ParticipantProfileModal: React.FC<ParticipantProfileModalProps> = (
   onTogglePeerMuteLocally,
   onOpenChat,
 }) => {
+  const [showKickConfirm, setShowKickConfirm] = useState(false);
+
   if (!isOpen || !participant) return null;
 
   return (
@@ -88,11 +96,19 @@ export const ParticipantProfileModal: React.FC<ParticipantProfileModalProps> = (
               </div>
               <span
                 className={`absolute bottom-1 right-1 w-4 h-4 rounded-full border-2 border-void-900 ${
-                  participant.is_online
-                    ? 'bg-emerald-400 ring-2 ring-emerald-400/30'
-                    : 'bg-void-600'
+                  !participant.is_online
+                    ? 'bg-void-600'
+                    : participant.presence_state === 'away'
+                    ? 'bg-amber-400 ring-2 ring-amber-400/30'
+                    : 'bg-emerald-400 ring-2 ring-emerald-400/30'
                 }`}
-                title={participant.is_online ? 'Online' : 'Offline'}
+                title={
+                  !participant.is_online
+                    ? 'Disconnected'
+                    : participant.presence_state === 'away'
+                    ? 'Away'
+                    : 'Active'
+                }
               />
             </div>
 
@@ -117,21 +133,29 @@ export const ParticipantProfileModal: React.FC<ParticipantProfileModalProps> = (
             <div className="flex items-center gap-2 mt-1">
               <span
                 className={`text-xs font-mono font-medium ${
-                  participant.is_online ? 'text-emerald-400' : 'text-ink-dim'
+                  !participant.is_online
+                    ? 'text-ink-dim'
+                    : participant.presence_state === 'away'
+                    ? 'text-amber-400'
+                    : 'text-emerald-400'
                 }`}
               >
-                {participant.is_online
-                  ? participant.active_connections > 1
-                    ? `Online (${participant.active_connections} tabs active)`
-                    : 'Online'
-                  : 'Offline'}
+                {!participant.is_online
+                  ? 'Disconnected'
+                  : participant.presence_state === 'away'
+                  ? 'Away (switched tab)'
+                  : participant.active_connections > 1
+                  ? `Active (${participant.active_connections} tabs)`
+                  : 'Active'}
               </span>
               <span className="text-void-600">•</span>
               <div className="flex items-center gap-1 text-[11px] font-mono text-ink-dim">
                 <Clock className="w-3 h-3" />
                 <span>
                   {participant.is_online
-                    ? 'Active now'
+                    ? participant.presence_state === 'away'
+                      ? 'Away'
+                      : 'Active now'
                     : participant.last_seen
                     ? `Last seen ${new Date(participant.last_seen).toLocaleTimeString([], {
                         hour: '2-digit',
@@ -229,6 +253,53 @@ export const ParticipantProfileModal: React.FC<ParticipantProfileModalProps> = (
                       <span>Mute {participant.username} Locally</span>
                     </>
                   )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Host Kick Option (Host only, cannot kick self) */}
+          {isHost && !isSelf && onKickParticipant && (
+            <div className="pt-1">
+              {showKickConfirm ? (
+                <div className="p-3 rounded-xl bg-rose-950/90 border border-rose-800 space-y-2 animate-in fade-in duration-150">
+                  <div className="flex items-center gap-2 text-rose-300 text-xs font-semibold">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>Kick {participant.username} from room?</span>
+                  </div>
+                  <p className="text-[11px] text-rose-200/80 leading-relaxed">
+                    They will be immediately disconnected from the room and voice chat.
+                  </p>
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      className="flex-1 text-xs h-7 py-1"
+                      onClick={() => {
+                        onKickParticipant(participant.id);
+                        setShowKickConfirm(false);
+                        onClose();
+                      }}
+                    >
+                      Confirm Kick
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-7 py-1 text-ink-muted hover:text-white"
+                      onClick={() => setShowKickConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowKickConfirm(true)}
+                  className="w-full py-2 px-3 rounded-xl text-xs font-medium text-rose-400 bg-rose-950/40 hover:bg-rose-950/80 border border-rose-900/60 hover:border-rose-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <UserX className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Kick from Room</span>
                 </button>
               )}
             </div>

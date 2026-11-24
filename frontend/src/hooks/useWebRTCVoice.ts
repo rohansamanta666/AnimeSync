@@ -47,8 +47,11 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
   // Audio device & volume settings
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [peerVolume, setPeerVolume] = useState<number>(100); // 0% - 200%
+  const [peerVolume, setPeerVolume] = useState<number>(100); // 0% - 200% default
   const [isPeerMutedLocally, setIsPeerMutedLocally] = useState<boolean>(false);
+  const [participantVolumeMap, setParticipantVolumeMap] = useState<Record<string, number>>({});
+  const [participantMutedMap, setParticipantMutedMap] = useState<Record<string, boolean>>({});
+  const [peerConnectionStateMap, setPeerConnectionStateMap] = useState<Record<string, RTCPeerConnectionState>>({});
   const [permissionError, setPermissionError] = useState<string | null>(null);
 
   // Peer metadata
@@ -57,6 +60,8 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
   // References
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
+  const pendingCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+  const remoteAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const audioContextRef = useRef<AudioContext | null>(null);
   const peerGainNodesRef = useRef<Map<string, GainNode>>(new Map());
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
@@ -78,6 +83,39 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
 
   const isPeerMutedLocallyRef = useRef(isPeerMutedLocally);
   isPeerMutedLocallyRef.current = isPeerMutedLocally;
+
+  const participantVolumeMapRef = useRef(participantVolumeMap);
+  participantVolumeMapRef.current = participantVolumeMap;
+
+  const participantMutedMapRef = useRef(participantMutedMap);
+  participantMutedMapRef.current = participantMutedMap;
+
+  // Helper functions for per-participant volume & local mute
+  const getPeerVolume = useCallback((participantId: string): number => {
+    return participantVolumeMapRef.current[participantId] ?? peerVolumeRef.current;
+  }, []);
+
+  const isPeerMuted = useCallback((participantId: string): boolean => {
+    return participantMutedMapRef.current[participantId] ?? isPeerMutedLocallyRef.current;
+  }, []);
+
+  const setParticipantVolume = useCallback((participantId: string, volume: number) => {
+    const clamped = Math.max(0, Math.min(200, volume));
+    setParticipantVolumeMap((prev) => {
+      const next = { ...prev, [participantId]: clamped };
+      participantVolumeMapRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const toggleParticipantMuteLocally = useCallback((participantId: string) => {
+    setParticipantMutedMap((prev) => {
+      const current = prev[participantId] ?? isPeerMutedLocallyRef.current;
+      const next = { ...prev, [participantId]: !current };
+      participantMutedMapRef.current = next;
+      return next;
+    });
+  }, []);
 
   // 1. Enumerate available audio input devices
   const enumerateDevices = useCallback(async () => {
@@ -114,30 +152,62 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     return audioContextRef.current;
   }, []);
 
-  // 3. Connect remote stream to Web Audio API GainNode (0% - 200%) & AnalyserNode
+  // Drain queued ICE candidates once remote description is set
+  const drainPendingCandidates = useCallback(async (socketId: string, pc: RTCPeerConnection) => {
+    const queue = pendingCandidatesRef.current.get(socketId);
+    if (queue && queue.length > 0) {
+      pendingCandidatesRef.current.delete(socketId);
+      for (const cand of queue) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.warn(`Failed adding queued ICE candidate for ${socketId}:`, e);
+        }
+      }
+    }
+  }, []);
+
+  // 3. Connect remote stream to HTML <audio> element (native playback) & Web Audio pipeline
   const routeRemoteAudio = useCallback(
     (socketId: string, participantId: string, stream: MediaStream) => {
+      const effectiveVol = participantVolumeMapRef.current[participantId] ?? peerVolumeRef.current;
+      const effectiveMuted = participantMutedMapRef.current[participantId] ?? isPeerMutedLocallyRef.current;
+
+      // 1. Native HTML <audio> element for reliable cross-browser/mobile playback (Safari/iOS fix)
+      let audioEl = remoteAudioElementsRef.current.get(socketId);
+      if (!audioEl) {
+        audioEl = document.createElement('audio');
+        audioEl.autoplay = true;
+        (audioEl as any).playsInline = true;
+        (audioEl as any).playsinline = true;
+        remoteAudioElementsRef.current.set(socketId, audioEl);
+      }
+      audioEl.srcObject = stream;
+      audioEl.volume = effectiveMuted ? 0.0 : Math.min(1.0, effectiveVol / 100);
+      audioEl.play().catch((err) => {
+        console.warn('Remote audio playback pending user interaction:', err);
+      });
+
+      // 2. Web Audio AnalyserNode (for speaking detection) & GainNode (for voice boost > 100%)
       const ctx = getOrCreateAudioContext();
       try {
         const source = ctx.createMediaStreamSource(stream);
 
-        // Independent GainNode for peer volume (Task 7.6)
-        const gainNode = ctx.createGain();
-        const currentGain = isPeerMutedLocallyRef.current
-          ? 0.0
-          : volumeToGain(peerVolumeRef.current);
-        gainNode.gain.setValueAtTime(currentGain, ctx.currentTime);
-        peerGainNodesRef.current.set(socketId, gainNode);
-
         // AnalyserNode for remote speaking detection (Task 7.4)
         const analyser = ctx.createAnalyser();
         analyser.fftSize = 256;
+        source.connect(analyser);
         remoteAnalysersRef.current.set(participantId, analyser);
 
-        // Connect graph: source -> analyser -> gainNode -> destination
-        source.connect(analyser);
-        analyser.connect(gainNode);
+        // GainNode for volume boost > 100% (adds extra signal beyond unity without double-playing)
+        const gainNode = ctx.createGain();
+        const boostGain = effectiveMuted || effectiveVol <= 100
+          ? 0.0
+          : volumeToGain(effectiveVol) - 1.0;
+        gainNode.gain.setValueAtTime(boostGain, ctx.currentTime);
+        source.connect(gainNode);
         gainNode.connect(ctx.destination);
+        peerGainNodesRef.current.set(socketId, gainNode);
       } catch (err) {
         console.warn('Failed to route remote audio through Web Audio pipeline:', err);
       }
@@ -172,18 +242,30 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
         }
       };
 
-      // Handle receiving remote audio track
+      // Handle receiving remote audio track (safely handle stream or track)
       pc.ontrack = (event) => {
-        if (event.streams && event.streams[0]) {
-          routeRemoteAudio(targetSocketId, targetParticipantId, event.streams[0]);
-        }
+        const stream = (event.streams && event.streams[0])
+          ? event.streams[0]
+          : new MediaStream([event.track]);
+        routeRemoteAudio(targetSocketId, targetParticipantId, stream);
       };
 
       pc.onconnectionstatechange = () => {
+        setPeerConnectionStateMap((prev) => ({
+          ...prev,
+          [targetParticipantId]: pc.connectionState,
+        }));
         if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
           peerConnectionsRef.current.delete(targetSocketId);
           peerGainNodesRef.current.delete(targetSocketId);
           remoteAnalysersRef.current.delete(targetParticipantId);
+          const el = remoteAudioElementsRef.current.get(targetSocketId);
+          if (el) {
+            el.pause();
+            el.srcObject = null;
+            el.remove();
+            remoteAudioElementsRef.current.delete(targetSocketId);
+          }
         }
       };
 
@@ -216,6 +298,12 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     setPermissionError(null);
 
     try {
+      // Direct user gesture: ensure AudioContext is initialized and resumed
+      const ctx = getOrCreateAudioContext();
+      if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: getAudioConstraints(selectedDeviceId),
         video: false,
@@ -224,7 +312,6 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       localStreamRef.current = stream;
 
       // Set up local speaking analyser
-      const ctx = getOrCreateAudioContext();
       try {
         const source = ctx.createMediaStreamSource(stream);
         const analyser = ctx.createAnalyser();
@@ -287,6 +374,20 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+
+    // Stop and remove all remote audio elements
+    remoteAudioElementsRef.current.forEach((el) => {
+      try {
+        el.pause();
+        el.srcObject = null;
+        el.remove();
+      } catch (e) {
+        // Ignored
+      }
+    });
+    remoteAudioElementsRef.current.clear();
+    pendingCandidatesRef.current.clear();
+    setPeerConnectionStateMap({});
 
     // Close all peer connections
     peerConnectionsRef.current.forEach((pc) => pc.close());
@@ -381,23 +482,39 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     };
   }, []);
 
-  // 10. Update Peer Voice Volume (0% - 200%) via Web Audio GainNode (Task 7.6)
+  // 10. Update Peer Voice Volume (0% - 200%) across HTML <audio> and Web Audio GainNode
   useEffect(() => {
     peerVolumeRef.current = peerVolume;
     isPeerMutedLocallyRef.current = isPeerMutedLocally;
+    participantVolumeMapRef.current = participantVolumeMap;
+    participantMutedMapRef.current = participantMutedMap;
 
     const ctx = audioContextRef.current;
-    if (!ctx) return;
 
-    const targetGain = isPeerMutedLocally ? 0.0 : volumeToGain(peerVolume);
-    peerGainNodesRef.current.forEach((gainNode) => {
-      try {
-        gainNode.gain.setValueAtTime(targetGain, ctx.currentTime);
-      } catch (e) {
-        console.warn('Could not set gain value:', e);
+    voicePeers.forEach((peer) => {
+      const effectiveVol = participantVolumeMap[peer.participant_id] ?? peerVolume;
+      const effectiveMuted = participantMutedMap[peer.participant_id] ?? isPeerMutedLocally;
+
+      // 1. Native HTML <audio> element
+      const audioEl = remoteAudioElementsRef.current.get(peer.socket_id);
+      if (audioEl) {
+        audioEl.volume = effectiveMuted ? 0.0 : Math.min(1.0, effectiveVol / 100);
+      }
+
+      // 2. Web Audio GainNode boost (only for > 100%)
+      const gainNode = peerGainNodesRef.current.get(peer.socket_id);
+      if (gainNode && ctx && ctx.state !== 'closed') {
+        try {
+          const boostGain = effectiveMuted || effectiveVol <= 100
+            ? 0.0
+            : volumeToGain(effectiveVol) - 1.0;
+          gainNode.gain.setValueAtTime(boostGain, ctx.currentTime);
+        } catch (e) {
+          console.warn('Could not set gain value:', e);
+        }
       }
     });
-  }, [peerVolume, isPeerMutedLocally]);
+  }, [peerVolume, isPeerMutedLocally, participantVolumeMap, participantMutedMap, voicePeers]);
 
   // 11. Toggle Mute
   const toggleMute = useCallback(() => {
@@ -441,6 +558,12 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     // A remote peer left voice
     const handleVoicePeerLeft = (data: { participant_id: string; socket_id: string }) => {
       setVoicePeers((prev) => prev.filter((p) => p.participant_id !== data.participant_id));
+      setPeerConnectionStateMap((prev) => {
+        const next = { ...prev };
+        delete next[data.participant_id];
+        return next;
+      });
+      pendingCandidatesRef.current.delete(data.socket_id);
       const pc = peerConnectionsRef.current.get(data.socket_id);
       if (pc) {
         pc.close();
@@ -448,6 +571,13 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       }
       peerGainNodesRef.current.delete(data.socket_id);
       remoteAnalysersRef.current.delete(data.participant_id);
+      const el = remoteAudioElementsRef.current.get(data.socket_id);
+      if (el) {
+        el.pause();
+        el.srcObject = null;
+        el.remove();
+        remoteAudioElementsRef.current.delete(data.socket_id);
+      }
     };
 
     // Received WebRTC Offer
@@ -455,6 +585,8 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       const pc = createPeerConnection(payload.sender_socket_id, payload.sender_participant_id);
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+        // Drain any ICE candidates received prior to setRemoteDescription
+        await drainPendingCandidates(payload.sender_socket_id, pc);
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
 
@@ -473,6 +605,8 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       if (pc) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+          // Drain any ICE candidates received prior to setRemoteDescription
+          await drainPendingCandidates(payload.sender_socket_id, pc);
         } catch (err) {
           console.error('Failed to handle incoming WebRTC answer:', err);
         }
@@ -481,13 +615,22 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
 
     // Received WebRTC ICE Candidate
     const handleVoiceIceCandidate = async (payload: VoiceIceCandidatePayload) => {
-      const pc = peerConnectionsRef.current.get(payload.sender_socket_id);
-      if (pc && payload.candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
-        } catch (err) {
-          console.warn('Could not add ICE candidate:', err);
-        }
+      const { sender_socket_id, candidate } = payload;
+      if (!candidate) return;
+
+      const pc = peerConnectionsRef.current.get(sender_socket_id);
+      // If peer connection not ready or remote description not yet set, queue candidate
+      if (!pc || !pc.remoteDescription || !pc.remoteDescription.type) {
+        const queue = pendingCandidatesRef.current.get(sender_socket_id) || [];
+        queue.push(candidate);
+        pendingCandidatesRef.current.set(sender_socket_id, queue);
+        return;
+      }
+
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.warn('Could not add ICE candidate:', err);
       }
     };
 
@@ -513,7 +656,7 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
       socket.off('voice_ice_candidate', handleVoiceIceCandidate);
       socket.off('voice_peer_mute_changed', handleVoicePeerMuteChanged);
     };
-  }, [socket, createPeerConnection]);
+  }, [socket, createPeerConnection, drainPendingCandidates]);
 
   // Clean up on unmount
   useEffect(() => {
@@ -532,6 +675,7 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     isPttActive,
     isSpeaking,
     peerSpeakingMap,
+    peerConnectionStateMap,
     voicePeers,
     audioDevices,
     selectedDeviceId,
@@ -540,6 +684,12 @@ export function useWebRTCVoice({ socket, auth, roomCode }: UseWebRTCVoiceProps) 
     setPeerVolume,
     isPeerMutedLocally,
     setIsPeerMutedLocally,
+    participantVolumeMap,
+    participantMutedMap,
+    getPeerVolume,
+    isPeerMuted,
+    setParticipantVolume,
+    toggleParticipantMuteLocally,
     permissionError,
     clearPermissionError: () => setPermissionError(null),
     joinVoice,

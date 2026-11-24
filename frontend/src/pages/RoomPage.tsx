@@ -22,6 +22,7 @@ import {
   PanelRightOpen,
   Keyboard,
   HardDrive,
+  UserX,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
@@ -215,6 +216,11 @@ export const RoomPage: React.FC = () => {
     setPeerVolume,
     isPeerMutedLocally,
     setIsPeerMutedLocally,
+    getPeerVolume,
+    isPeerMuted,
+    setParticipantVolume,
+    toggleParticipantMuteLocally,
+    peerConnectionStateMap,
     permissionError,
     clearPermissionError,
     joinVoice,
@@ -231,6 +237,7 @@ export const RoomPage: React.FC = () => {
   type SidebarTab = 'chat' | 'voice' | 'queue' | 'members';
   const [activeTab, setActiveTab] = useState<SidebarTab>('chat');
   const [unreadMessages, setUnreadMessages] = useState<number>(0);
+  const [kickedMessage, setKickedMessage] = useState<string | null>(null);
   const prevMsgCountRef = useRef<number>(0);
 
   // Phase 8: Collapsible Sidebar, Theater Mode & Modals
@@ -240,6 +247,57 @@ export const RoomPage: React.FC = () => {
     useState<ParticipantPresence | null>(null);
   const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
   const [showMediaModal, setShowMediaModal] = useState<boolean>(false);
+
+  // Part 4: Tab visibility detection for Presence state (Active vs Away)
+  useEffect(() => {
+    if (!socket) return;
+    const handleVisibilityChange = () => {
+      const presenceState = document.hidden ? 'away' : 'active';
+      socket.emit('update_presence_state', { state: presenceState });
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+    window.addEventListener('blur', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+      window.removeEventListener('blur', handleVisibilityChange);
+    };
+  }, [socket]);
+
+  // Part 3: Listen for kicked event from server
+  useEffect(() => {
+    if (!socket) return;
+    const handleKicked = (data: { reason?: string }) => {
+      const msg = data?.reason || 'You have been removed from the room by the host.';
+      setKickedMessage(msg);
+      leaveVoice();
+      setTimeout(() => {
+        navigate('/');
+      }, 2500);
+    };
+    socket.on('kicked', handleKicked);
+    return () => {
+      socket.off('kicked', handleKicked);
+    };
+  }, [socket, leaveVoice, navigate]);
+
+  // Part 3: Host kick action handler
+  const handleKickParticipant = async (participantId: string) => {
+    if (!auth || !auth.is_host || !room) return;
+    try {
+      if (socket && socket.connected) {
+        socket.emit('kick_participant', { target_participant_id: participantId });
+      } else {
+        await api.kickParticipant(room.code, participantId, {
+          participantId: auth.participant_id,
+          sessionToken: auth.session_token,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to kick participant:', err);
+    }
+  };
 
   // Phase 8: Global Keyboard Shortcuts
   useEffect(() => {
@@ -268,14 +326,23 @@ export const RoomPage: React.FC = () => {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
+  // Part 5: Enhanced unread chat notification logic
+  const isChatVisible = !isSidebarCollapsed && activeTab === 'chat';
+
   useEffect(() => {
-    if (activeTab === 'chat') {
+    if (isChatVisible) {
       setUnreadMessages(0);
     } else if (messages.length > prevMsgCountRef.current) {
-      setUnreadMessages((prev) => prev + (messages.length - prevMsgCountRef.current));
+      const newMessages = messages.slice(prevMsgCountRef.current);
+      const incomingFromOthers = newMessages.filter(
+        (m) => m.participant_id !== auth?.participant_id
+      );
+      if (incomingFromOthers.length > 0) {
+        setUnreadMessages((prev) => prev + incomingFromOthers.length);
+      }
     }
     prevMsgCountRef.current = messages.length;
-  }, [messages.length, activeTab]);
+  }, [messages, isChatVisible, auth?.participant_id]);
 
   // Listen for socket events: episode added and verification result
   useEffect(() => {
@@ -460,6 +527,7 @@ export const RoomPage: React.FC = () => {
             isPttActive={isPttActive}
             isSpeaking={isSpeaking}
             peerSpeakingMap={peerSpeakingMap}
+            peerConnectionStateMap={peerConnectionStateMap}
             voicePeers={voicePeers}
             audioDevices={audioDevices}
             selectedDeviceId={selectedDeviceId}
@@ -492,8 +560,19 @@ export const RoomPage: React.FC = () => {
                     </div>
                     <span
                       className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-void-900 ${
-                        p.is_online ? 'bg-emerald-400' : 'bg-void-600'
+                        !p.is_online
+                          ? 'bg-void-600'
+                          : p.presence_state === 'away'
+                          ? 'bg-amber-400 ring-2 ring-amber-400/30'
+                          : 'bg-emerald-400'
                       }`}
+                      title={
+                        !p.is_online
+                          ? 'Disconnected'
+                          : p.presence_state === 'away'
+                          ? 'Away'
+                          : 'Active'
+                      }
                     />
                   </div>
                   <div>
@@ -1019,6 +1098,7 @@ export const RoomPage: React.FC = () => {
               isPttActive={isPttActive}
               isSpeaking={isSpeaking}
               peerSpeakingMap={peerSpeakingMap}
+              peerConnectionStateMap={peerConnectionStateMap}
               voicePeers={voicePeers}
               audioDevices={audioDevices}
               selectedDeviceId={selectedDeviceId}
@@ -1087,9 +1167,19 @@ export const RoomPage: React.FC = () => {
                           </div>
                           <span
                             className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-void-900 ${
-                              p.is_online ? 'bg-emerald-400 ring-2 ring-emerald-400/20' : 'bg-void-600'
+                              !p.is_online
+                                ? 'bg-void-600'
+                                : p.presence_state === 'away'
+                                ? 'bg-amber-400 ring-2 ring-amber-400/30'
+                                : 'bg-emerald-400 ring-2 ring-emerald-400/20'
                             }`}
-                            title={p.is_online ? 'Online' : 'Offline'}
+                            title={
+                              !p.is_online
+                                ? 'Disconnected'
+                                : p.presence_state === 'away'
+                                ? 'Away'
+                                : 'Active'
+                            }
                           />
                         </div>
 
@@ -1109,12 +1199,20 @@ export const RoomPage: React.FC = () => {
                             <span className="text-void-600">•</span>
                             <span
                               className={`text-[10px] font-mono ${
-                                p.is_online ? 'text-emerald-400 font-semibold' : 'text-ink-dim'
+                                !p.is_online
+                                  ? 'text-ink-dim'
+                                  : p.presence_state === 'away'
+                                  ? 'text-amber-400 font-semibold'
+                                  : 'text-emerald-400 font-semibold'
                               }`}
                             >
-                              {p.is_online ? (
-                                p.active_connections > 1 ? `Online (${p.active_connections} tabs)` : 'Online'
-                              ) : 'Offline'}
+                              {!p.is_online
+                                ? 'Disconnected'
+                                : p.presence_state === 'away'
+                                ? 'Away'
+                                : p.active_connections > 1
+                                ? `Active (${p.active_connections} tabs)`
+                                : 'Active'}
                             </span>
                           </div>
                         </div>
@@ -1222,18 +1320,46 @@ export const RoomPage: React.FC = () => {
         onClose={() => setSelectedProfileParticipant(null)}
         participant={selectedProfileParticipant}
         isSelf={selectedProfileParticipant?.id === auth?.participant_id}
+        isHost={!!auth?.is_host}
+        onKickParticipant={handleKickParticipant}
         isInVoice={isInVoice}
         isPeerInVoice={voicePeers.some((p) => p.participant_id === selectedProfileParticipant?.id)}
         isSpeaking={selectedProfileParticipant ? !!peerSpeakingMap[selectedProfileParticipant.id] : false}
-        peerVolume={peerVolume}
-        onPeerVolumeChange={setPeerVolume}
-        isPeerMutedLocally={isPeerMutedLocally}
-        onTogglePeerMuteLocally={() => setIsPeerMutedLocally(!isPeerMutedLocally)}
+        peerVolume={selectedProfileParticipant ? getPeerVolume(selectedProfileParticipant.id) : peerVolume}
+        onPeerVolumeChange={(vol) => {
+          if (selectedProfileParticipant) {
+            setParticipantVolume(selectedProfileParticipant.id, vol);
+          } else {
+            setPeerVolume(vol);
+          }
+        }}
+        isPeerMutedLocally={selectedProfileParticipant ? isPeerMuted(selectedProfileParticipant.id) : isPeerMutedLocally}
+        onTogglePeerMuteLocally={() => {
+          if (selectedProfileParticipant) {
+            toggleParticipantMuteLocally(selectedProfileParticipant.id);
+          } else {
+            setIsPeerMutedLocally(!isPeerMutedLocally);
+          }
+        }}
         onOpenChat={() => {
           setActiveTab('chat');
           setIsSidebarCollapsed(false);
         }}
       />
+
+      {/* Part 3: Kicked notification overlay banner */}
+      {kickedMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="max-w-md w-full glass-panel rounded-2xl p-6 border border-rose-800 text-center space-y-4 shadow-2xl">
+            <div className="w-12 h-12 rounded-full bg-rose-950/80 border border-rose-800 text-rose-400 flex items-center justify-center mx-auto shadow-lg">
+              <UserX className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold text-white tracking-tight">Removed from Room</h2>
+            <p className="text-sm text-ink-muted leading-relaxed">{kickedMessage}</p>
+            <p className="text-xs text-ink-dim font-mono">Redirecting to home screen…</p>
+          </div>
+        </div>
+      )}
 
       {/* Phase 8 Task 8.4: Keyboard Shortcuts Help Modal */}
       <KeyboardShortcutsModal

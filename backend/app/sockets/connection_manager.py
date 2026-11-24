@@ -26,6 +26,8 @@ class ConnectionManager:
         self._participant_sockets: Dict[Tuple[str, str], Set[str]] = {}
         # room_code -> Set[participant_id]
         self._room_participants: Dict[str, Set[str]] = {}
+        # (room_code, participant_id) -> 'active' | 'away'
+        self._participant_presence_state: Dict[Tuple[str, str], str] = {}
         self._lock = asyncio.Lock()
 
     async def register_connection(
@@ -85,12 +87,46 @@ class ConnectionManager:
                 is_now_offline = len(self._participant_sockets[key]) == 0
                 if is_now_offline:
                     del self._participant_sockets[key]
+                    self._participant_presence_state.pop(key, None)
                     if session.room_code in self._room_participants:
                         self._room_participants[session.room_code].discard(session.participant_id)
             else:
                 is_now_offline = True
 
             return session, is_now_offline
+
+    def set_presence_state(self, room_code: str, participant_id: str, state: str) -> None:
+        """Sets participant presence state ('active' or 'away')."""
+        key = (room_code.upper(), participant_id)
+        self._participant_presence_state[key] = state
+
+    def get_presence_state(self, room_code: str, participant_id: str) -> str:
+        """Returns 'active', 'away', or 'disconnected'."""
+        key = (room_code.upper(), participant_id)
+        if not self.is_participant_online(room_code, participant_id):
+            return "disconnected"
+        return self._participant_presence_state.get(key, "active")
+
+    def get_participant_sids(self, room_code: str, participant_id: str) -> Set[str]:
+        """Returns all active socket IDs for a participant in a room."""
+        key = (room_code.upper(), participant_id)
+        return set(self._participant_sockets.get(key, set()))
+
+    async def remove_participant_from_room(self, room_code: str, participant_id: str) -> List[str]:
+        """
+        Force-removes all connection mappings for a participant from a room (e.g. on kick).
+        Returns list of removed socket IDs.
+        """
+        async with self._lock:
+            code = room_code.upper()
+            key = (code, participant_id)
+            sids = list(self._participant_sockets.pop(key, set()))
+            self._participant_presence_state.pop(key, None)
+            if code in self._room_participants:
+                self._room_participants[code].discard(participant_id)
+            for sid in sids:
+                self._sid_to_session.pop(sid, None)
+            return sids
 
     def get_session(self, sid: str) -> Optional[SocketSession]:
         return self._sid_to_session.get(sid)
@@ -126,13 +162,21 @@ class ConnectionManager:
 
         presence = []
         for p in room.participants:
+            # Filter out kicked participants
+            if getattr(p, "is_kicked", False):
+                continue
             conn_count = self.get_participant_socket_count(room_code, p.id)
             is_online = conn_count > 0
+            if is_online:
+                p_state = self._participant_presence_state.get((room_code, p.id), "active")
+            else:
+                p_state = "disconnected"
             presence.append({
                 "id": p.id,
                 "username": p.username,
                 "is_host": p.is_host,
                 "is_online": is_online,
+                "presence_state": p_state,
                 "status": p.status.value if hasattr(p.status, "value") else str(p.status),
                 "active_connections": conn_count,
                 "last_seen": p.last_seen.isoformat() if p.last_seen else None

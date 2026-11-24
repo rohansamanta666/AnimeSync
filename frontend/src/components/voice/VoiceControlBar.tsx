@@ -33,6 +33,7 @@ export interface VoiceControlBarProps {
   isPttActive: boolean;
   isSpeaking: boolean;
   peerSpeakingMap: Record<string, boolean>;
+  peerConnectionStateMap?: Record<string, RTCPeerConnectionState>;
   voicePeers: VoicePeer[];
   audioDevices: MediaDeviceInfo[];
   selectedDeviceId: string;
@@ -57,6 +58,7 @@ export const VoiceControlBar: React.FC<VoiceControlBarProps> = ({
   isPttActive,
   isSpeaking,
   peerSpeakingMap,
+  peerConnectionStateMap,
   voicePeers,
   audioDevices,
   selectedDeviceId,
@@ -291,7 +293,11 @@ export const VoiceControlBar: React.FC<VoiceControlBarProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1.5 text-[10px] font-mono">
-                      {peer.is_muted ? (
+                      {peerConnectionStateMap?.[peer.participant_id] === 'connecting' ? (
+                        <span className="text-amber-400 font-semibold animate-pulse">Connecting…</span>
+                      ) : peerConnectionStateMap?.[peer.participant_id] === 'failed' ? (
+                        <span className="text-rose-400 font-semibold">Failed</span>
+                      ) : peer.is_muted ? (
                         <span className="text-rose-400 flex items-center gap-1">
                           <MicOff className="w-3 h-3" /> Muted
                         </span>

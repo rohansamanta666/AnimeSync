@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.database import get_db
-from backend.app.models.participant import Participant
+from backend.app.models.participant import Participant, ParticipantStatus
 from backend.app.services.room_manager import RoomManager
 from backend.app.services.queue_manager import QueueManager
 from backend.app.services.chat_service import ChatService
@@ -54,6 +54,11 @@ async def _authenticate_participant(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid participant credentials for this room"
         )
+    if getattr(participant, "is_kicked", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You have been removed from this room by the host."
+        )
     if require_host and not participant.is_host:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -95,6 +100,99 @@ async def join_room(code: str, req: RoomJoinRequest, db: AsyncSession = Depends(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to join room: {str(e)}")
+
+
+@router.post("/{code}/participants/{participant_id}/kick")
+async def kick_participant_api(
+    code: str,
+    participant_id: str,
+    host_participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db)
+):
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    host = await _authenticate_participant(
+        db, room.id, host_participant_id, session_token, require_host=True
+    )
+
+    if participant_id == host.id:
+        raise HTTPException(status_code=400, detail="Host cannot kick themselves")
+
+    from sqlalchemy import select
+    res = await db.execute(
+        select(Participant).where(
+            Participant.id == participant_id,
+            Participant.room_id == room.id
+        )
+    )
+    target = res.scalar_one_or_none()
+    if not target:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    target.is_kicked = True
+    target.status = ParticipantStatus.DISCONNECTED
+    await db.commit()
+
+    # Cancel any grace task
+    from backend.app.sockets.server import _pending_grace_periods
+    grace = _pending_grace_periods.pop((room.code, participant_id), None)
+    if grace:
+        grace.cancel()
+
+    # Socket teardown and broadcasts
+    from backend.app.sockets.connection_manager import connection_manager
+    from backend.app.sockets.voice_manager import voice_manager
+    from backend.app.sockets.playback_manager import playback_manager
+    import time
+
+    target_sids = connection_manager.get_participant_sids(room.code, participant_id)
+    for sid in target_sids:
+        await sio.emit(
+            "kicked",
+            {"reason": "You have been removed from the room by the host.", "room_code": room.code},
+            to=sid
+        )
+
+    voice_manager.leave_voice(room.code, participant_id)
+    await sio.emit(
+        "voice_peer_left",
+        {
+            "participant_id": participant_id,
+            "username": target.username,
+            "socket_id": list(target_sids)[0] if target_sids else ""
+        },
+        room=room.code
+    )
+    playback_manager.clear_buffering_for_participant(room.code, participant_id)
+    await connection_manager.remove_participant_from_room(room.code, participant_id)
+
+    for sid in target_sids:
+        try:
+            await sio.disconnect(sid)
+        except Exception:
+            pass
+
+    await sio.emit(
+        "user_left",
+        {
+            "participant_id": participant_id,
+            "username": target.username,
+            "timestamp": time.time(),
+            "reason": "kicked"
+        },
+        room=room.code
+    )
+    presence = await connection_manager.get_presence_payload(db, room.code)
+    await sio.emit(
+        "presence_updated",
+        {"room_code": room.code, "participants": presence},
+        room=room.code
+    )
+
+    return {"status": "OK", "message": f"{target.username} was kicked from the room"}
 
 
 @router.get("/{code}/queue", response_model=QueueResponse)

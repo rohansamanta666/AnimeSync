@@ -30,6 +30,7 @@ export interface ParticipantPresence {
   status: ParticipantStatus;
   active_connections: number;
   last_seen?: string | null;
+  presence_state?: 'active' | 'away' | 'disconnected';
 }
 
 export type SocketConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';

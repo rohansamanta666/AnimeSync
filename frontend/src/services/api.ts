@@ -73,6 +73,23 @@ export const api = {
     });
   },
 
+  async kickParticipant(
+    code: string,
+    participantId: string,
+    auth: { participantId: string; sessionToken: string }
+  ): Promise<{ status: string; message: string }> {
+    return request<{ status: string; message: string }>(
+      `/rooms/${code.toUpperCase()}/participants/${participantId}/kick`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Participant-ID': auth.participantId,
+          'X-Session-Token': auth.sessionToken,
+        },
+      }
+    );
+  },
+
   async getQueue(code: string): Promise<QueueResponse> {
     return request<QueueResponse>(`/rooms/${code.toUpperCase()}/queue`);
   },

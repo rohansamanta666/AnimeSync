@@ -21,7 +21,9 @@ from backend.app.sockets.voice_manager import voice_manager
 # ---------------------------------------------------------------------------
 _countdown_tasks: dict[str, asyncio.Task] = {}
 _intermission_tasks: dict[str, asyncio.Task] = {}
+_pending_grace_periods: dict[tuple[str, str], asyncio.Task] = {}
 INTERMISSION_SECONDS = 15.0
+GRACE_PERIOD_SECONDS = 45.0
 
 
 def _cancel_intermission(room_code: str) -> bool:
@@ -110,6 +112,40 @@ async def disconnect(sid: str):
                 },
                 room=session.room_code
             )
+
+            # Part 4: Schedule departure grace period purge for guests
+            if not session.is_host:
+                async def _run_grace_period_purge(r_code: str, p_id: str, delay: float = GRACE_PERIOD_SECONDS):
+                    try:
+                        await asyncio.sleep(delay)
+                        if not connection_manager.is_participant_online(r_code, p_id):
+                            async with AsyncSessionLocal() as db_inner:
+                                q_del = select(Participant).where(
+                                    Participant.id == p_id,
+                                    Participant.is_host == False
+                                )
+                                res_del = await db_inner.execute(q_del)
+                                p_del = res_del.scalar_one_or_none()
+                                if p_del:
+                                    await db_inner.delete(p_del)
+                                    await db_inner.commit()
+                                pres = await connection_manager.get_presence_payload(db_inner, r_code)
+                                await sio.emit(
+                                    "presence_updated",
+                                    {"room_code": r_code, "participants": pres},
+                                    room=r_code
+                                )
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        _pending_grace_periods.pop((r_code, p_id), None)
+
+                old_task = _pending_grace_periods.pop((session.room_code, session.participant_id), None)
+                if old_task and not old_task.done():
+                    old_task.cancel()
+                _pending_grace_periods[(session.room_code, session.participant_id)] = asyncio.create_task(
+                    _run_grace_period_purge(session.room_code, session.participant_id)
+                )
 
             # Phase 5 Task 5.5: Clean up buffering state on departure
             was_buf_removed, should_resume, state = playback_manager.clear_buffering_for_participant(
@@ -239,6 +275,21 @@ async def handle_join_room(sid: str, data: dict):
             await sio.emit("error", error_payload, to=sid)
             return {"success": False, "error": error_payload}
 
+        # Guard against kicked participants rejoining
+        if getattr(participant, "is_kicked", False):
+            error_payload = {
+                "code": "KICKED",
+                "message": "You have been removed from this room by the host."
+            }
+            await sio.emit("kicked", error_payload, to=sid)
+            await sio.emit("error", error_payload, to=sid)
+            return {"success": False, "error": error_payload}
+
+        # Cancel any pending departure grace period purge for this participant
+        grace_task = _pending_grace_periods.pop((room_code, participant.id), None)
+        if grace_task and not grace_task.done():
+            grace_task.cancel()
+
         # Update last_seen
         participant.last_seen = datetime.now(timezone.utc)
         await db.commit()
@@ -340,8 +391,25 @@ async def leave_room(sid: str, data: dict = None):
     except Exception:
         pass
 
+    # Cancel pending departure grace period task if any
+    grace_task = _pending_grace_periods.pop((session.room_code, session.participant_id), None)
+    if grace_task and not grace_task.done():
+        grace_task.cancel()
+
     async with AsyncSessionLocal() as db:
         if is_now_offline:
+            # If guest explicitly leaves the room, remove them from database
+            if not session.is_host:
+                q_del = select(Participant).where(
+                    Participant.id == session.participant_id,
+                    Participant.is_host == False
+                )
+                res_del = await db.execute(q_del)
+                p_del = res_del.scalar_one_or_none()
+                if p_del:
+                    await db.delete(p_del)
+                    await db.commit()
+
             # Phase 4: Cancel room countdown if active when participant leaves
             if session.room_code in _countdown_tasks:
                 _cancel_countdown(session.room_code)
@@ -1679,6 +1747,135 @@ async def voice_mute_toggle(sid: str, data: dict = None):
         room=session.room_code,
     )
     return {"status": "OK", "is_muted": is_muted}
+
+
+@sio.event
+async def update_presence_state(sid: str, data: dict = None):
+    """Updates participant presence state (active vs away)."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    state = (data or {}).get("state", "active")
+    if state not in ("active", "away"):
+        state = "active"
+
+    connection_manager.set_presence_state(session.room_code, session.participant_id, state)
+
+    async with AsyncSessionLocal() as db:
+        presence = await connection_manager.get_presence_payload(db, session.room_code)
+        await sio.emit(
+            "presence_updated",
+            {
+                "room_code": session.room_code,
+                "participants": presence
+            },
+            room=session.room_code
+        )
+
+    return {"status": "OK", "state": state}
+
+
+@sio.event
+async def kick_participant(sid: str, data: dict = None):
+    """Host kicks a participant from the room."""
+    session = connection_manager.get_session(sid)
+    if not session:
+        return {"status": "ERROR", "message": "Socket session unauthenticated"}
+
+    if not session.is_host:
+        return {"status": "ERROR", "message": "Only the room host can kick participants"}
+
+    target_id = (data or {}).get("target_participant_id")
+    if not target_id:
+        return {"status": "ERROR", "message": "Missing target_participant_id"}
+
+    if target_id == session.participant_id:
+        return {"status": "ERROR", "message": "Host cannot kick themselves"}
+
+    async with AsyncSessionLocal() as db:
+        q = select(Participant).where(
+            Participant.id == target_id,
+            Participant.room_id == session.room_id
+        )
+        res = await db.execute(q)
+        target = res.scalar_one_or_none()
+        if not target:
+            return {"status": "ERROR", "message": "Participant not found in room"}
+
+        target.is_kicked = True
+        target.status = ParticipantStatus.DISCONNECTED
+        await db.commit()
+
+        target_username = target.username
+
+        # Cancel any pending grace period task for target
+        grace = _pending_grace_periods.pop((session.room_code, target_id), None)
+        if grace and not grace.done():
+            grace.cancel()
+
+        # Get all socket IDs for target
+        target_sids = connection_manager.get_participant_sids(session.room_code, target_id)
+
+        # Notify target sockets that they have been kicked
+        for t_sid in target_sids:
+            await sio.emit(
+                "kicked",
+                {
+                    "reason": "You have been removed from the room by the host.",
+                    "room_code": session.room_code
+                },
+                to=t_sid
+            )
+
+        # Clean up voice participation
+        voice_manager.leave_voice(session.room_code, target_id)
+        await sio.emit(
+            "voice_peer_left",
+            {
+                "participant_id": target_id,
+                "username": target_username,
+                "socket_id": list(target_sids)[0] if target_sids else ""
+            },
+            room=session.room_code
+        )
+
+        # Clean up buffering state
+        playback_manager.clear_buffering_for_participant(session.room_code, target_id)
+
+        # Remove from connection manager
+        await connection_manager.remove_participant_from_room(session.room_code, target_id)
+
+        # Disconnect target sockets
+        for t_sid in target_sids:
+            try:
+                await sio.disconnect(t_sid)
+            except Exception:
+                pass
+
+        # Broadcast user_left and updated presence
+        await sio.emit(
+            "user_left",
+            {
+                "participant_id": target_id,
+                "username": target_username,
+                "timestamp": time.time(),
+                "reason": "kicked"
+            },
+            room=session.room_code
+        )
+
+        presence = await connection_manager.get_presence_payload(db, session.room_code)
+        await sio.emit(
+            "presence_updated",
+            {
+                "room_code": session.room_code,
+                "participants": presence
+            },
+            room=session.room_code
+        )
+
+        return {"status": "OK", "kicked_id": target_id, "username": target_username}
 
 
 

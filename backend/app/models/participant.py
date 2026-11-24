@@ -28,6 +28,7 @@ class Participant(Base):
     username: Mapped[str] = mapped_column(String(50), nullable=False)
     session_token: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     is_host: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_kicked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[ParticipantStatus] = mapped_column(
         SQLEnum(ParticipantStatus), default=ParticipantStatus.WAITING_FOR_FILE, nullable=False
     )

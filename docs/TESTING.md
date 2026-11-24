@@ -104,6 +104,14 @@ Located in `backend/tests/`:
   - `test_security_host_only_actions_enforcement`: Tests host-only authorization barriers for queue removal, reorder, episode selection, media deletion, and chunk purging, verifying 403 Forbidden for non-host participants.
   - `test_security_spa_missing_api_routes_404`: Verifies that requests for missing `/api/*` and `socket.io` routes return standard 404 JSON rather than being masked by SPA `index.html` fallback.
   - `test_e2e_full_multi_user_watch_party_flow`: Comprehensive end-to-end integration test validating the entire watch-party lifecycle across two users: room creation, joining, chunked 5MB upload, resumable range download, SHA-256 verification, ready gate synchronization, 3-second countdown to watching, play/pause/seek synchronization, buffering detection and recovery, and host media deletion.
+- **`test_kick_and_presence.py`** (Phase 10 Tasks 10.2 & 10.3):
+  - `test_host_kick_participant_socket`: Tests host kicking a participant via Socket.IO, verifying `kicked` emission to target, `user_kicked` emission to room, and presence update.
+  - `test_host_kick_participant_rest`: Tests host kicking a participant via REST API (`POST /api/rooms/{code}/participants/{id}/kick`).
+  - `test_host_cannot_kick_self`: Verifies host cannot kick themselves via REST or Socket.IO (400 Bad Request / error emission).
+  - `test_non_host_cannot_kick_participant`: Verifies non-host participants receive 403 Forbidden attempting to kick peers.
+  - `test_kicked_participant_cannot_rejoin`: Verifies kicked participant cannot rejoin the room (rejected with `KICKED` code).
+  - `test_update_presence_state_active_and_away`: Verifies switching presence states between `active` and `away` via `update_presence_state` socket event.
+  - `test_disconnect_grace_period_and_reconnect`: Verifies 45-second grace period on disconnect, retaining participant as disconnected, and cancelling grace period upon timely reconnection.
 
 ### 2.2 Frontend Unit Tests (`node --test`)
 Located in `frontend/tests/`:
@@ -148,45 +156,60 @@ Located in `frontend/tests/`:
   - `formatBytes`: validates byte formatting across B, KB, MB, GB, negative, and NaN values.
   - `calculateStoragePercent`: validates host storage percentage calculation, zero-division guarding, and 100% clamping.
   - `formatEpisodeCode`: validates standard S01E01 padding and non-zero normalization.
+- **`playback_sync_fixes.test.ts`** (9 unit tests):
+  - `shouldShowBuffering`: validates buffering indicator logic (suppressed on intentional pause, active on waiting/stalled).
+  - `formatTime`: validates player timestamp formatting across diverse durations.
+  - `volumeToGain`: validates profile popover peer voice volume slider (0% to 200%).
+- **`voice_and_presence.test.ts`** (6 unit tests, Phase 10):
+  - `volumeToGain`: validates Web Audio boost signal calculation for values > 100% up to 200%.
+  - `native audio element volume clamping`: validates 0.0 to 1.0 volume clamping for hardware playback.
+  - `ICE candidate queueing & draining`: simulates race condition where candidates arrive before remote SDP and validates drain after `setRemoteDescription`.
+  - `classifyPresence`: accurately classifies Active, Away, and Disconnected status indicators.
+  - `filterUnreadChatMessages`: counts messages from peers while chat is collapsed or hidden.
+  - `filterUnreadChatMessages`: verifies local user's own messages never increment unread counter.
 
 ---
 
-## 3. Two-Computer Validation Protocol (Acceptance Testing)
+## 3. Two-Device Validation Protocol (Acceptance Testing)
 
-Before declaring any release ready, execute this manual protocol across two independent computers on separate Wi-Fi networks:
+Before declaring any release ready, execute this manual protocol across two independent devices (e.g. Host Mac + Guest Phone / Laptop):
 
 | Step | Action | Expected Result | Pass/Fail |
 | :--- | :--- | :--- | :--- |
 | **1** | Host starts server and launches tunnel (`./scripts/start.sh`) | Terminal outputs local URL and public HTTPS tunnel URL. | [ ] |
 | **2** | Host creates room "Demon Slayer Night" | Host enters room lobby with 6-character code generated. | [ ] |
-| **3** | Friend navigates to public tunnel URL and joins with room code | Friend appears instantly in Host's participant list via Socket.IO. | [ ] |
+| **3** | Guest navigates to public tunnel URL and joins with room code | Guest appears instantly in Host's participant list via Socket.IO. | [ ] |
 | **4** | Host uploads a test MP4 video file | Chunked progress displays 0% $\rightarrow$ 100%. Server computes SHA-256. | [ ] |
-| **5** | Friend clicks "Download Episode" | Download begins via range-request stream and completes to Friend's Mac. | [ ] |
-| **6** | Friend selects the downloaded file in file picker | Web Worker computes SHA-256; server validates matching hash $\rightarrow$ status `VERIFIED`. | [ ] |
-| **7** | Friend tests selecting a DIFFERENT file | Verification fails; clear error displayed; "Ready" button remains disabled. | [ ] |
+| **5** | Guest clicks "Download Episode" | Download begins via range-request stream and completes to Guest device. | [ ] |
+| **6** | Guest selects the downloaded file in file picker | Web Worker computes SHA-256; server validates matching hash $\rightarrow$ status `VERIFIED`. | [ ] |
+| **7** | Guest tests selecting a DIFFERENT file | Verification fails; clear error displayed; "Ready" button remains disabled. | [ ] |
 | **8** | Both participants click "Ready" | Server triggers 3-second synchronized countdown. | [ ] |
-| **9** | Playback starts simultaneously | Video begins at 00:00 on both screens. Sync health shows green "Synced". | [ ] |
-| **10**| Host pauses video at 02:15 | Friend's video pauses immediately at 02:15. | [ ] |
-| **11**| Friend seeks to 05:40 | Host's video seeks immediately to 05:40. | [ ] |
-| **12**| Host changes playback speed to 1.25x | Friend's playback speed synchronizes to 1.25x. | [ ] |
-| **13**| Test Text Chat | Messages sent appear instantaneously on both screens in chronological order. | [ ] |
-| **14**| Both join Voice Chat | Audio connection establishes via Google STUN; speaking rings activate. | [ ] |
-| **15**| Test Push-to-Talk (`V`) | Audio transmits only while holding `V`; muting is instant on keyup. | [ ] |
-| **16**| Test Independent Audio | Adjusting anime volume has zero effect on peer voice volume. | [ ] |
-| **17**| Test Sidebar Collapse | Clicking arrow collapses chat/participant sidebar; video expands smoothly. | [ ] |
-| **18**| Test Fullscreen Mode | Pressing `F` hides all UI elements; mouse movement shows controls; Escape exits. | [ ] |
+| **9** | Playback starts simultaneously | Video begins at 00:00 on both screens. Mobile autoplay prompt allows tap-to-start. | [ ] |
+| **10**| Host pauses video at 02:15 | Guest's video pauses immediately at 02:15. | [ ] |
+| **11**| Guest seeks to 05:40 | Host's video seeks immediately to 05:40. | [ ] |
+| **12**| Host changes playback speed to 1.25x | Guest's playback speed synchronizes to 1.25x. | [ ] |
+| **13**| Test Text Chat & Unread Dot | Send message from Guest while Host collapses sidebar; Host sees rose dot on tab/toggle. | [ ] |
+| **14**| Both join Voice Chat | User gesture unlocks AudioContext; STUN candidates exchange; both hear peer audio. | [ ] |
+| **15**| Test Voice Volume Slider & Local Mute | Open peer modal, adjust volume slider (0%–200%) or toggle local mute; verify audio level. | [ ] |
+| **16**| Test Tab Switch (Away Presence) | Guest switches tabs or minimizes browser; Host sees amber "Away" dot in member roster. | [ ] |
+| **17**| Test Disconnection Grace Period | Guest closes browser tab; Host sees gray "Disconnected" dot; Guest reconnects within 45s $\rightarrow$ active. | [ ] |
+| **18**| Test Host Kick | Host opens Guest profile, clicks "Kick from Room" and confirms; Guest redirected to `/`. | [ ] |
 
 ---
 
 ## 4. Automated Testing vs Real-World Network Verification Notice
 
 ### 4.1 Automated Test Guarantees
-The automated test suites (`./scripts/test.sh`, containing 73 backend pytest tests and 87 frontend unit tests) deterministically verify:
+The automated test suites (`./scripts/test.sh`, containing 80 backend pytest tests and 102 frontend unit tests) deterministically verify:
 - Complete REST API lifecycles, chunked 5MB upload assembly, range-request streaming downloads, and SHA-256 incremental hashing.
 - Server-authoritative playback state machine, drift correction formulas, and sequence-based loop suppression.
 - Multi-client buffering pauses, concurrent playback ended deduplication, and auto-next readiness gates.
 - Directory traversal guards, host-only permission barriers, and SPA 404 routing integrity.
 - Web Audio API gain calculations (0–200%), speaking detection RMS algorithms, and keyboard shortcut event isolation.
+- WebRTC ICE candidate buffering and remote audio decoding mechanisms.
+- Host kick authorizations, database flags, and rejoin rejection.
+- Disconnect grace period lifecycle and tab-switch presence transitions.
+- Unread chat badge counting and suppression rules.
 
 ### 4.2 Real-World Network Boundaries & WebRTC Constraints
 - **Domestic Networks & Home Wi-Fi**: Free Google STUN servers (`stun:stun.l.google.com:19302`) successfully resolve NAT candidates across Full Cone, Restricted Cone, and Port-Restricted Cone NAT configurations typical of residential internet connections and mobile hotspots.

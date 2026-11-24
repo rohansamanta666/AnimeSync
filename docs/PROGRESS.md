@@ -1,11 +1,11 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 9 (Final Testing, Security & Zero-Cost Deployment) — **COMPLETED (100%)**
+- **Current Phase**: Phase 10 (Enhancements, Cross-Device Voice, Presence Lifecycle & Room Management) — **COMPLETED (100%)**
 - **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
 - **Git Branch**: `main`
-- **Latest Commit**: `601f066` (`fix(playback): unobtrusive buffering indicator, mobile autoplay interaction prompt, and test coverage`)
-- **Overall Health**: 100% Healthy & Clean (0 failing tests, 73 backend tests passing, 96 frontend tests passing, 0 TypeScript errors, Vite production build successful)
+- **Latest Commit**: Checkpoint & Phase 10 enhancements
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 80 backend tests passing, 102 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
@@ -24,6 +24,7 @@
 | **Phase 7** | Text Chat & WebRTC Voice | **COMPLETED** | 100% |
 | **Phase 8** | Watch-Room Polish & Customization | **COMPLETED** | 100% |
 | **Phase 9** | Testing, Security & Free Deployment | **COMPLETED** | 100% |
+| **Phase 10** | Voice Cross-Device, Presence Lifecycle & Room Management | **COMPLETED** | 100% |
 
 ---
 
@@ -311,15 +312,40 @@
 - [x] **Task 9.5: Complete Documentation & Project Handover (`README.md`, `PROGRESS.md`, `IMPLEMENTATION_PLAN.md`, `DEPLOYMENT.md`, `TESTING.md`)**:
   - Comprehensive documentation covering system architecture, API protocols, testing, deployment, and security.
 
+### Phase 10: Enhancements, Cross-Device Voice, Presence Lifecycle & Room Management
+- [x] **Task 10.1: Cross-Device WebRTC Voice Chat Hardening (`useWebRTCVoice.ts`, `VoiceControlBar.tsx`)**:
+  - **ICE Candidate Queueing & Drain Mechanism**: Resolved race condition where STUN ICE candidates arrive before `setRemoteDescription` completes (`pendingCandidatesRef` buffer drained immediately after remote SDP application).
+  - **Safari & iOS Native Audio Playback Compatibility**: Attached incoming remote streams to native HTML5 `<audio>` elements with `playsInline` and `autoplay`, bypassing WebKit's Web Audio silent output restriction.
+  - **Unified Volume & Boost Architecture**: Clamped native `<audio>` element volume strictly between 0.0 and 1.0; used Web Audio `GainNode` strictly for amplification boost (> 100% up to 200%), eliminating dual-playback and audio echo.
+  - **Explicit User-Gesture AudioContext Unlocking**: Added synchronous `.resume()` invocation inside the `joinVoice()` user click handler to satisfy browser autoplay security policies.
+  - **Per-Participant Volume & Local Mute**: Implemented individual peer volume sliders (0%–200%) and local mute toggles in the participant profile modal.
+  - **Live Peer Connection State Indicators**: Added real-time visual connection indicators (`Connecting...` [amber], `Connected` [dim], `Failed` [rose], `Speaking` [emerald], `Muted` [rose]).
+- [x] **Task 10.2: Host-Only Participant Kick Action (`rooms.py`, `server.py`, `ParticipantProfileModal.tsx`, `RoomPage.tsx`)**:
+  - **Database & Model Extension**: Added `is_kicked` boolean flag to `Participant` model with automatic SQLite schema migration.
+  - **Host Authorization & Self-Kick Protection**: Strict verification that only the room host can trigger kicks; host self-kicking is rejected.
+  - **Clean Socket & Voice Teardown**: Server emits `kicked` event to target sockets, removes socket connections, tears down active WebRTC voice channels, clears any pending buffering states, and broadcasts updated presence room-wide.
+  - **Persistent Rejoin Prevention**: Kicked participants attempting to rejoin via Socket.IO or REST are rejected with `KICKED` error code and forbidden response.
+  - **Frontend Confirmation Dialog & Redirection**: Two-step kick confirmation inside `ParticipantProfileModal`; kicked participant is redirected cleanly to `/` with an informative banner.
+- [x] **Task 10.3: Departure Presence Lifecycle & Disconnection Grace Period (`connection_manager.py`, `server.py`, `RoomPage.tsx`)**:
+  - **Tab-Switching vs Window Blur**: Preserved active vs away state: switching tabs or blurring window transitions participant status to `Away` (amber dot).
+  - **Disconnection Detection & 45-Second Grace Period**: Browser or tab closure immediately marks participant as `Disconnected` (gray dot) without immediate room purge. A 45-second background grace period task runs on the server.
+  - **Grace Period Cancellation on Reconnect**: If the user refreshes or reconnects within 45 seconds, the grace period task is cancelled and presence seamlessly returns to `Active`.
+  - **Authoritative Departure Purge**: Non-host participants who remain disconnected beyond 45 seconds (or explicitly click Leave Room) are purged cleanly from the room database and member roster.
+- [x] **Task 10.4: Discord-Style Unread Chat Notification Dot (`RoomPage.tsx`)**:
+  - **Selective Unread Counter**: Increments unread message count only when the chat panel is hidden (collapsed sidebar or non-chat tab) AND the incoming message originated from another participant.
+  - **Own Message Suppression**: Messages sent by the local participant never trigger unread counts.
+  - **Instant Reset**: Unread count instantly resets to 0 when the user opens or activates the chat panel.
+  - **Visual Badging**: Displays a vibrant rose indicator dot on both the collapsed sidebar trigger and the chat tab header.
+
 ---
 
 ## 4. In-Progress Features
-- None (All 9 Phases are 100% complete).
+- None (All 10 Phases are 100% complete).
 
 ---
 
 ## 5. Pending Features
-- None (All 9 Phases are 100% complete).
+- None (All 10 Phases are 100% complete).
 
 ---
 
@@ -331,6 +357,7 @@
   - **Browser Codec Compatibility**: Playback uses native HTML5 `<video>`; video files encoded with unsupported codecs trigger the player's custom codec alert prompting the user to load a standard H.264/AAC MP4 or WebM file.
   - **Concurrent Video Ended Events**: Multiple viewers reaching video end concurrently are deduplicated through server monotonic epoch cooldowns.
   - **WebRTC STUN vs Symmetric NAT**: Uses free public Google STUN servers. Works seamlessly over typical home NATs, mobile hotspots, and direct connections; strict enterprise symmetric firewalls would require TURN or Tailscale mesh in cloud deployments.
+  - **Safari & iOS WebRTC Audio Decoding**: Native `<audio>` elements handle audio playback with hardware acceleration across WebKit and Blink engines.
   - **Microphone Permissions**: Rejection or lack of microphone hardware displays clear non-blocking alerts with device re-selection.
 
 ---
@@ -345,6 +372,7 @@
 - `backend/tests/test_chat_and_voice.py` (8 tests) — **PASSED**
 - `backend/tests/test_media.py` (4 tests) — **PASSED**
 - `backend/tests/test_security_and_e2e.py` (5 tests, Phase 9) — **PASSED**
+- `backend/tests/test_kick_and_presence.py` (7 tests, Phase 10) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
@@ -353,13 +381,14 @@
 - `frontend/tests/subtitles.test.ts` (13 unit tests) — **PASSED**
 - `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
 - `frontend/tests/playback_sync_fixes.test.ts` (9 unit tests) — **PASSED**
+- `frontend/tests/voice_and_presence.test.ts` (6 unit tests, Phase 10) — **PASSED**
 - `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 73 backend tests + 96 frontend unit tests + Vite build)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 80 backend tests + 102 frontend unit tests + Vite build)
 
 ---
 
 ## 8. Exact Next Task
-- **AnimeSync is 100% Complete**: All 9 phases are fully implemented, verified, tested, and documented. The application is ready for immediate production watch parties via `./scripts/start.sh`.
+- **AnimeSync is 100% Complete**: All 10 phases are fully implemented, verified, tested, and documented. The application is ready for immediate production watch parties via `./scripts/start.sh`.
 
 ---
 
