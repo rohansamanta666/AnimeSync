@@ -224,3 +224,4 @@ async def test_departure_grace_period_and_purge():
         presence = await connection_manager.get_presence_payload(db, room.code)
         p_map = {p["username"]: p["presence_state"] for p in presence}
         assert p_map["DepartingGuest"] == "active"
+
