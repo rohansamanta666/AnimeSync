@@ -9,6 +9,11 @@ import {
   MediaStorageResponse,
   MediaDeleteResponse,
   MediaPurgeResponse,
+  BrowseAnimeItem,
+  BrowsePageResponse,
+  ValidatedSourceResponse,
+  DownloadTaskItem,
+  DownloadListResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -318,6 +323,117 @@ export const api = {
         'X-Participant-ID': pid,
         'X-Session-Token': token,
       },
+    });
+  },
+
+  // Browse Anime Discovery & Authorized Media Sources
+  async discoverAnime(
+    category: 'trending' | 'popular' | 'recent' = 'trending',
+    page = 1,
+    perPage = 18
+  ): Promise<BrowsePageResponse> {
+    const params = new URLSearchParams({
+      category,
+      page: String(page),
+      per_page: String(perPage),
+    });
+    return request<BrowsePageResponse>(`/browse/discover?${params.toString()}`);
+  },
+
+  async searchBrowseAnime(query: string, page = 1, perPage = 18): Promise<BrowsePageResponse> {
+    const params = new URLSearchParams({
+      q: query,
+      page: String(page),
+      per_page: String(perPage),
+    });
+    return request<BrowsePageResponse>(`/browse/search?${params.toString()}`);
+  },
+
+  async getBrowseAnimeDetails(animeId: string): Promise<BrowseAnimeItem> {
+    return request<BrowseAnimeItem>(`/browse/anime/${encodeURIComponent(animeId)}`);
+  },
+
+  async getProviderCatalog(): Promise<{ count: number; results: BrowseAnimeItem[] }> {
+    return request<{ count: number; results: BrowseAnimeItem[] }>('/browse/providers/catalog');
+  },
+
+  async validateMediaSource(
+    streamUrl: string,
+    subtitleUrl?: string | null,
+    audioTrack: 'sub' | 'dub' = 'sub'
+  ): Promise<ValidatedSourceResponse> {
+    return request<ValidatedSourceResponse>('/browse/sources/validate', {
+      method: 'POST',
+      body: JSON.stringify({
+        stream_url: streamUrl,
+        subtitle_url: subtitleUrl || null,
+        audio_track: audioTrack,
+      }),
+    });
+  },
+
+  async addOnlineEpisode(
+    roomCode: string,
+    payload: {
+      anime_title: string;
+      season?: number;
+      episode_number: number;
+      display_title?: string;
+      stream_url: string;
+      subtitle_url?: string | null;
+      set_active?: boolean;
+    },
+    auth: { participantId?: string; participant_id?: string; sessionToken?: string; session_token?: string }
+  ): Promise<{ episode: Episode; current_episode_id: string | null; episodes: Episode[] }> {
+    const pid = auth.participant_id || auth.participantId || '';
+    const token = auth.session_token || auth.sessionToken || '';
+    return request(`/rooms/${roomCode.toUpperCase()}/online-episode`, {
+      method: 'POST',
+      headers: {
+        'X-Participant-ID': pid,
+        'X-Session-Token': token,
+      },
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // Episode Download Manager
+  async listDownloads(): Promise<DownloadListResponse> {
+    return request<DownloadListResponse>('/downloads');
+  },
+
+  async startDownload(payload: {
+    anime_title: string;
+    episode_number: number;
+    source_url: string;
+  }): Promise<DownloadTaskItem> {
+    return request<DownloadTaskItem>('/downloads', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async pauseDownload(taskId: string): Promise<DownloadTaskItem> {
+    return request<DownloadTaskItem>(`/downloads/${encodeURIComponent(taskId)}/pause`, {
+      method: 'POST',
+    });
+  },
+
+  async resumeDownload(taskId: string): Promise<DownloadTaskItem> {
+    return request<DownloadTaskItem>(`/downloads/${encodeURIComponent(taskId)}/resume`, {
+      method: 'POST',
+    });
+  },
+
+  async retryDownload(taskId: string): Promise<DownloadTaskItem> {
+    return request<DownloadTaskItem>(`/downloads/${encodeURIComponent(taskId)}/retry`, {
+      method: 'POST',
+    });
+  },
+
+  async deleteDownload(taskId: string): Promise<{ success: boolean; deleted_id: string }> {
+    return request<{ success: boolean; deleted_id: string }>(`/downloads/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
     });
   },
 };

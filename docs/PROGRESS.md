@@ -1,11 +1,11 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 10 (Enhancements, Cross-Device Voice, Presence Lifecycle & Room Management) — **COMPLETED (100%)**
+- **Current Phase**: Phase 11 (Complete Anime Browsing, Media Providers, Downloads & Online Watch Together) — **COMPLETED (100%)**
 - **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
-- **Git Branch**: `main`
-- **Latest Commit**: Checkpoint & Phase 10 enhancements
-- **Overall Health**: 100% Healthy & Clean (0 failing tests, 80 backend tests passing, 102 frontend tests passing, 0 TypeScript errors, Vite production build successful)
+- **Git Branch**: `feat/browse-anime`
+- **Latest Commit**: Phase 11 Browse & Watch Experience
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 85 backend tests passing, 105 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
@@ -25,6 +25,7 @@
 | **Phase 8** | Watch-Room Polish & Customization | **COMPLETED** | 100% |
 | **Phase 9** | Testing, Security & Free Deployment | **COMPLETED** | 100% |
 | **Phase 10** | Voice Cross-Device, Presence Lifecycle & Room Management | **COMPLETED** | 100% |
+| **Phase 11** | Anime Browsing, Media Providers, Downloads & Online Sync | **COMPLETED** | 100% |
 
 ---
 
@@ -339,6 +340,22 @@
 
 ---
 
+### Phase 11: Complete Anime Browsing, Media Providers, Downloads & Online Watch Together
+- [x] **Task 11.1: AniList Discovery & Metadata Service (`anime_metadata_service.py`, `api/browse.py`)**:
+  - Trending, Popular, Recently Updated, and paginated Search via AniList public GraphQL API.
+  - Full anime detail metadata (posters, banners, synopsis, genres, status, release year, rating, episodes list).
+- [x] **Task 11.2: Modular Media Provider Architecture & SSRF Guards (`media_providers.py`, `url_security.py`)**:
+  - `OpenCatalogMediaProvider` (Creative Commons sample/open media), `SelfHostedCatalogMediaProvider`, and `UserUrlMediaProvider` (Sub/Dub selector).
+  - Strict SSRF protection blocking `localhost`, `.local`, `.internal`, loopback/private/link-local/reserved IPs, and non-HTTP(S) schemes.
+- [x] **Task 11.3: Episode Download Manager (`download_manager.py`, `api/downloads.py`, `models/download.py`)**:
+  - Direct MP4/WebM background downloads with progress tracking, pause/resume (HTTP `Range`), retry, delete, and SHA-256 verification.
+  - Explicitly rejects HLS (`.m3u8`) playlists as non-downloadable single files.
+- [x] **Task 11.4: Dedicated Browse UI & OnlineVideoPlayer (`BrowsePage.tsx`, `AnimeDetailsPage.tsx`, `OnlineVideoPlayer.tsx`, `RoomPage.tsx`)**:
+  - Separate `/browse` and `/browse/:id` pages accessible from `Navbar` (`Browse Anime` button) without altering `LandingPage` or local-file `VideoPlayer`.
+  - `OnlineVideoPlayer` supports MP4, WebM, HLS (`.m3u8` via `hls.js` + Safari native fallback), `.vtt`/`.srt` subtitles, resume position, and `VideoPlayerHandle` for Watch Together synchronization.
+
+---
+
 ## 4. In-Progress Features
 - None (All 10 Phases are 100% complete).
 
@@ -373,6 +390,7 @@
 - `backend/tests/test_media.py` (4 tests) — **PASSED**
 - `backend/tests/test_security_and_e2e.py` (5 tests, Phase 9) — **PASSED**
 - `backend/tests/test_kick_and_presence.py` (7 tests, Phase 10) — **PASSED**
+- `backend/tests/test_browse_and_downloads.py` (5 tests, Phase 11) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
@@ -382,8 +400,9 @@
 - `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
 - `frontend/tests/playback_sync_fixes.test.ts` (9 unit tests) — **PASSED**
 - `frontend/tests/voice_and_presence.test.ts` (6 unit tests, Phase 10) — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
-- Master test runner `./scripts/test.sh` — **PASSED** (All 80 backend tests + 102 frontend unit tests + Vite build)
+- `frontend/tests/browse_and_online.test.ts` (3 unit tests, Phase 11) — **PASSED**
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED**
+- Master test runner `./scripts/test.sh` — **PASSED** (All 85 backend tests + 105 frontend unit tests + Vite build)
 
 ---
 

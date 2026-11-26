@@ -1,5 +1,6 @@
 from typing import Optional
 from pathlib import Path
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.database import get_db
@@ -523,5 +524,114 @@ async def purge_temp_media(
         freed_bytes=purge_result["freed_bytes"],
         purged_count=purge_result["purged_count"],
     )
+
+
+class OnlineEpisodeCreateRequest(BaseModel):
+    anime_title: str
+    season: int = 1
+    episode_number: int = 1
+    display_title: Optional[str] = None
+    stream_url: str
+    subtitle_url: Optional[str] = None
+    set_active: bool = True
+
+
+@router.post("/{code}/online-episode")
+async def add_online_episode(
+    code: str,
+    payload: OnlineEpisodeCreateRequest,
+    participant_id: str = Header(..., alias="X-Participant-ID"),
+    session_token: str = Header(..., alias="X-Session-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Adds an authorized online stream episode (.mp4/.webm/.m3u8) to a room (host only)."""
+    from backend.app.models.episode import Episode, UploadStatus
+    from backend.app.services.url_security import validate_external_media_url
+    from backend.app.sockets.playback_manager import playback_manager
+    from backend.app.sockets import sio
+
+    room = await RoomManager.get_room_by_code(db, code)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    await _authenticate_participant(db, room.id, participant_id, session_token, require_host=True)
+
+    url_check = validate_external_media_url(payload.stream_url, resolve_dns=False)
+    if not url_check["valid"]:
+        raise HTTPException(status_code=400, detail=url_check["error"])
+
+    clean_sub_url = None
+    if payload.subtitle_url and payload.subtitle_url.strip():
+        sub_check = validate_external_media_url(payload.subtitle_url, resolve_dns=False)
+        if not sub_check["valid"]:
+            raise HTTPException(status_code=400, detail=f"Invalid subtitle URL: {sub_check['error']}")
+        clean_sub_url = sub_check["url"]
+
+    existing = await QueueManager.get_queue(db, room.id)
+    next_pos = len(existing)
+    fmt = url_check["format"]
+    mime = "application/vnd.apple.mpegurl" if fmt == "hls" else ("video/webm" if fmt == "webm" else "video/mp4")
+
+    ep = Episode(
+        room_id=room.id,
+        anime_title=payload.anime_title.strip()[:200] or "Online Anime",
+        season=max(1, payload.season),
+        episode_number=max(1, payload.episode_number),
+        display_title=(payload.display_title or "").strip()[:200] or f"Episode {payload.episode_number}",
+        filename=f"online_ep{payload.episode_number}",
+        file_path="",
+        file_size_bytes=0,
+        sha256_hash=None,
+        mime_type=mime,
+        upload_status=UploadStatus.COMPLETED,
+        queue_position=next_pos,
+        source_type="online",
+        stream_url=url_check["url"],
+        subtitle_url=clean_sub_url,
+    )
+    db.add(ep)
+    await db.commit()
+    await db.refresh(ep)
+
+    if payload.set_active:
+        room.current_episode_id = ep.id
+        await db.commit()
+        playback_manager.reset_state(room.code)
+
+    episodes = await QueueManager.get_queue(db, room.id)
+    queue_dicts = [QueueManager.serialize_episode(item) for item in episodes]
+
+    await sio.emit(
+        "queue_updated",
+        {
+            "room_code": room.code,
+            "episodes": queue_dicts,
+            "current_episode_id": room.current_episode_id,
+        },
+        room=room.code,
+    )
+
+    if payload.set_active:
+        await sio.emit(
+            "playback_sync",
+            {
+                "room_code": room.code,
+                "action": "PAUSE",
+                "timestamp": 0.0,
+                "playback_speed": 1.0,
+                "is_playing": False,
+                "sequence_number": 0,
+                "originating_socket_id": "server",
+                "updated_at": playback_manager.get_or_create_state(room.code).updated_at,
+                "paused_for_buffering": False,
+            },
+            room=room.code,
+        )
+
+    return {
+        "episode": QueueManager.serialize_episode(ep),
+        "current_episode_id": room.current_episode_id,
+        "episodes": queue_dicts,
+    }
 
 

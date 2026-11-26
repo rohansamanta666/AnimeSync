@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Storage Paths
     STORAGE_DIR: str = str(BASE_DIR / "storage" / "videos")
     TEMP_UPLOAD_DIR: str = str(BASE_DIR / "storage" / "uploads_temp")
+    DOWNLOAD_DIR: str = str(BASE_DIR / "storage" / "downloads")
 
     # Upload Constraints (Default: 4GB max, 5MB chunks)
     MAX_UPLOAD_SIZE_MB: int = 4096
@@ -36,6 +37,10 @@ class Settings(BaseSettings):
     DRIFT_IGNORE_THRESHOLD: float = 0.25
     DRIFT_RATE_ADJUST_THRESHOLD: float = 1.5
     DRIFT_HARD_SEEK_THRESHOLD: float = 3.0
+
+    # Browse Anime Metadata & Authorized Media Providers
+    ANILIST_API_URL: str = "https://graphql.anilist.co"
+    SELF_HOSTED_CATALOG_URL: str = ""
 
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
@@ -56,4 +61,5 @@ settings = Settings()
 # Ensure storage directories exist
 Path(settings.STORAGE_DIR).mkdir(parents=True, exist_ok=True)
 Path(settings.TEMP_UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
+Path(settings.DOWNLOAD_DIR).mkdir(parents=True, exist_ok=True)
 

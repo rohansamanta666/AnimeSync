@@ -1,6 +1,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
+from typing import Optional
 from sqlalchemy import String, Integer, Float, DateTime, Enum as SQLEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.app.database import Base
@@ -33,6 +34,9 @@ class Episode(Base):
         SQLEnum(UploadStatus), default=UploadStatus.PENDING, nullable=False
     )
     queue_position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(20), default="local", nullable=False)
+    stream_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
+    subtitle_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

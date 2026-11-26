@@ -47,6 +47,9 @@ export interface Episode {
   duration_seconds?: number | null;
   upload_status: UploadStatus;
   queue_position: number;
+  source_type?: 'local' | 'online';
+  stream_url?: string | null;
+  subtitle_url?: string | null;
 }
 
 export interface Room {
@@ -226,4 +229,93 @@ export interface MediaPurgeResponse {
   message: string;
   freed_bytes: number;
   purged_count: number;
+}
+
+export interface BrowseEpisodeItem {
+  episode_number: number;
+  title: string;
+  stream_url?: string | null;
+  subtitle_url?: string | null;
+  format?: 'hls' | 'mp4' | 'webm' | 'unknown' | null;
+  downloadable?: boolean;
+  audio_track?: 'sub' | 'dub' | string;
+}
+
+export interface BrowseAnimeItem {
+  id: string;
+  anilist_id?: number;
+  source?: string;
+  provider?: string;
+  title: string;
+  romaji_title?: string | null;
+  native_title?: string | null;
+  description: string;
+  cover_image?: string | null;
+  banner_image?: string | null;
+  genres: string[];
+  status: string;
+  release_year?: number | null;
+  rating?: number | null;
+  episodes_count: number;
+  duration_minutes?: number | null;
+  studios?: string[];
+  supports_sub_dub_selection?: boolean;
+  episodes?: BrowseEpisodeItem[];
+}
+
+export interface BrowsePageResponse {
+  category?: string;
+  query?: string;
+  page: number;
+  per_page: number;
+  total: number;
+  last_page: number;
+  has_next_page: boolean;
+  results: BrowseAnimeItem[];
+  metadata_available: boolean;
+  error?: string;
+}
+
+export interface ValidatedSourceResponse {
+  valid: boolean;
+  provider: string;
+  stream_url: string;
+  subtitle_url?: string | null;
+  format: 'hls' | 'mp4' | 'webm' | 'unknown';
+  downloadable: boolean;
+  audio_track: 'sub' | 'dub';
+}
+
+export type DownloadTaskStatus =
+  | 'PENDING'
+  | 'DOWNLOADING'
+  | 'PAUSED'
+  | 'COMPLETED'
+  | 'FAILED'
+  | 'CANCELLED';
+
+export interface DownloadTaskItem {
+  id: string;
+  anime_title: string;
+  episode_number: number;
+  source_url: string;
+  filename: string;
+  total_bytes: number;
+  downloaded_bytes: number;
+  progress_percent: number;
+  sha256_hash?: string | null;
+  supports_range: boolean;
+  status: DownloadTaskStatus;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface DownloadListResponse {
+  downloads: DownloadTaskItem[];
+  storage: {
+    download_dir_bytes: number;
+    disk_free_bytes: number;
+    disk_total_bytes: number;
+  };
 }

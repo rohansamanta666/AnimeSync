@@ -215,7 +215,21 @@ graph LR
   - `duration_seconds`: Float (nullable)
   - `upload_status`: Enum (`UPLOADING`, `COMPLETED`, `FAILED`)
   - `queue_position`: Integer
+  - `source_type`: String (`local` | `online`)
+  - `stream_url`: String (nullable)
+  - `subtitle_url`: String (nullable)
   - `created_at`: DateTime
+- **`download_tasks`**:
+  - `id`: String (UUID)
+  - `anime_title`: String
+  - `episode_number`: Integer
+  - `source_url`: String
+  - `filename`: String
+  - `file_path`: String (contained inside `storage/downloads/`)
+  - `total_bytes`, `downloaded_bytes`: Integer
+  - `sha256_hash`: String (nullable)
+  - `supports_range`: Boolean
+  - `status`: Enum (`PENDING`, `DOWNLOADING`, `PAUSED`, `COMPLETED`, `FAILED`, `CANCELLED`)
 - **`messages`**:
   - `id`: String (UUID)
   - `room_id`: String (Foreign Key)
@@ -223,4 +237,13 @@ graph LR
   - `username`: String
   - `content`: String
   - `created_at`: DateTime
+
+---
+
+## 5. Browse Anime, Media Providers & Online Watch Together Architecture
+
+- **Metadata (`anime_metadata_service.py`)**: Queries AniList's public GraphQL API for trending, popular, recently updated, paginated search, and anime detail views — strictly separated from playable media sources.
+- **Media Providers (`media_providers.py`, `url_security.py`)**: Supports `OpenCatalogMediaProvider` (Creative Commons media), `SelfHostedCatalogMediaProvider` (`SELF_HOSTED_CATALOG_URL`), and `UserUrlMediaProvider` with SSRF protection (blocking loopback, private RFC1918, link-local, and non-HTTP(S) URLs).
+- **Episode Download Manager (`download_manager.py`)**: Downloads authorized direct MP4/WebM files to `storage/downloads/` with HTTP `Range` pause/resume, retry, and SHA-256 verification. HLS (`.m3u8`) playlists are rejected from direct file download.
+- **Online Playback & Room Sync (`OnlineVideoPlayer.tsx`, `RoomPage.tsx`)**: Uses `hls.js` + native Safari HLS fallback for `.m3u8` and native `<video>` for MP4/WebM, exposing `VideoPlayerHandle` so `useVideoSync` and `PlaybackManager` synchronize play, pause, seek, drift, buffering, and reconnection recovery identically to local-file mode.
 
