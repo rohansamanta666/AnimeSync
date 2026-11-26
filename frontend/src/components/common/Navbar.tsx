@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { PlaySquare, HardDrive, Plus, LogIn, Tv } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { PlaySquare, HardDrive, Plus, LogIn } from 'lucide-react';
 import { api } from '../../services/api';
 import { HealthInfo } from '../../types';
 import { Button } from './Button';
@@ -12,7 +12,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onCreateRoom, onJoinRoom }) => {
   const [health, setHealth] = useState<HealthInfo | null>(null);
-  const location = useLocation();
 
   useEffect(() => {
     api.getHealth()
@@ -57,17 +56,6 @@ export const Navbar: React.FC<NavbarProps> = ({ onCreateRoom, onJoinRoom }) => {
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-2">
-            <Link
-              to="/stream"
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                location.pathname === '/stream'
-                  ? 'bg-violet-950/80 border-violet-600 text-violet-200'
-                  : 'bg-void-900/80 border-void-700 text-ink-muted hover:text-white hover:border-void-500'
-              }`}
-            >
-              <Tv className="w-3.5 h-3.5" />
-              <span>Stream</span>
-            </Link>
             {onJoinRoom && (
               <Button
                 variant="secondary"

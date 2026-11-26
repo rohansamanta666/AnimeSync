@@ -215,9 +215,6 @@ graph LR
   - `duration_seconds`: Float (nullable)
   - `upload_status`: Enum (`UPLOADING`, `COMPLETED`, `FAILED`)
   - `queue_position`: Integer
-  - `source_type`: String (`local` | `stream`)
-  - `stream_url`: String (nullable)
-  - `subtitle_url`: String (nullable)
   - `created_at`: DateTime
 - **`messages`**:
   - `id`: String (UUID)
@@ -226,19 +223,4 @@ graph LR
   - `username`: String
   - `content`: String
   - `created_at`: DateTime
-
----
-
-## 5. Authorized Streaming Architecture (`/stream` & Room Stream Mode)
-
-AnimeSync supports an optional **Authorized Streaming** mode alongside the primary local-file P2P verification mode:
-
-- **Metadata & Catalog (`backend/app/services/streaming_service.py`)**:
-  - Queries AniList's free public GraphQL API for anime search/details and includes a built-in authorized open-licensed catalog (HLS `.m3u8` and `.mp4`) plus optional `STREAMING_CATALOG_URL`.
-  - No third-party scraping, DRM bypassing, or API keys are used.
-- **HLS & Direct Browser Playback (`frontend/src/components/video/StreamVideoPlayer.tsx`)**:
-  - Uses `hls.js` for `.m3u8` streams (with native HLS fallback on Safari/iOS) and native `<video>` for `.mp4`/`.webm`.
-  - Supports `.vtt`/`.srt` subtitle tracks, error handling with retry, and `localStorage` position persistence.
-- **Watch Together Sync (`RoomPage.tsx` + `useVideoSync`)**:
-  - `StreamVideoPlayer` exposes the same `VideoPlayerHandle` imperative API as `VideoPlayer`, allowing `useVideoSync` and `PlaybackManager` to synchronize play, pause, seek, playback speed, buffering, and late-joiner state identically without routing video data through Socket.IO.
 

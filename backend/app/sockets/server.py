@@ -324,7 +324,19 @@ async def handle_join_room(sid: str, data: dict):
             "created_at": room.created_at.isoformat() if room.created_at else None,
             "participants": presence,
             "episodes": [
-                QueueManager.serialize_episode(ep)
+                {
+                    "id": ep.id,
+                    "anime_title": ep.anime_title,
+                    "season": ep.season,
+                    "episode_number": ep.episode_number,
+                    "display_title": ep.display_title,
+                    "filename": ep.filename,
+                    "file_size_bytes": ep.file_size_bytes,
+                    "sha256_hash": ep.sha256_hash,
+                    "duration_seconds": ep.duration_seconds,
+                    "upload_status": ep.upload_status.value if hasattr(ep.upload_status, "value") else str(ep.upload_status),
+                    "queue_position": ep.queue_position
+                }
                 for ep in room.episodes
             ]
         }
@@ -900,15 +912,6 @@ async def playback_action(sid: str, data: dict = None):
         if participant.room_id != session.room_id:
             return {"status": "ERROR", "message": "Participant does not belong to this room"}
 
-        room_res = await db.execute(select(Room).where(Room.id == session.room_id))
-        room = room_res.scalar_one_or_none()
-        is_stream_mode = False
-        if room and room.current_episode_id:
-            ep_res = await db.execute(select(Episode).where(Episode.id == room.current_episode_id))
-            active_ep = ep_res.scalar_one_or_none()
-            if active_ep and getattr(active_ep, "source_type", "local") == "stream":
-                is_stream_mode = True
-
         unverified_statuses = {
             ParticipantStatus.WAITING_FOR_FILE,
             ParticipantStatus.DOWNLOADING,
@@ -916,7 +919,7 @@ async def playback_action(sid: str, data: dict = None):
             ParticipantStatus.VERIFYING,
             ParticipantStatus.VERIFICATION_FAILED,
         }
-        if not is_stream_mode and participant.status in unverified_statuses:
+        if participant.status in unverified_statuses:
             return {
                 "status": "ERROR",
                 "message": (
@@ -1012,15 +1015,6 @@ async def buffering_start(sid: str, data: dict = None):
         if not participant:
             return {"status": "ERROR", "message": "Participant not found"}
 
-        room_res = await db.execute(select(Room).where(Room.id == session.room_id))
-        room = room_res.scalar_one_or_none()
-        is_stream_mode = False
-        if room and room.current_episode_id:
-            ep_res = await db.execute(select(Episode).where(Episode.id == room.current_episode_id))
-            active_ep = ep_res.scalar_one_or_none()
-            if active_ep and getattr(active_ep, "source_type", "local") == "stream":
-                is_stream_mode = True
-
         unverified_statuses = {
             ParticipantStatus.WAITING_FOR_FILE,
             ParticipantStatus.DOWNLOADING,
@@ -1028,7 +1022,7 @@ async def buffering_start(sid: str, data: dict = None):
             ParticipantStatus.VERIFYING,
             ParticipantStatus.VERIFICATION_FAILED,
         }
-        if not is_stream_mode and participant.status in unverified_statuses:
+        if participant.status in unverified_statuses:
             return {
                 "status": "ERROR",
                 "message": f"Participant status '{participant.status.value}' cannot participate in buffering sync",
@@ -1497,12 +1491,9 @@ async def select_episode(sid: str, data: dict = None):
         if not success or not episode:
             return {"status": "ERROR", "message": "Episode not found in queue"}
 
-        if getattr(episode, "source_type", "local") == "stream":
-            playback_manager.reset_state(room.code)
-        else:
-            await invalidate_room_readiness(
-                room.code, reason="Selected a different episode from queue", reset_watching=True
-            )
+        await invalidate_room_readiness(
+            room.code, reason="Selected a different episode from queue", reset_watching=True
+        )
 
         episodes = await QueueManager.get_queue(db, room.id)
         queue_dicts = [QueueManager.serialize_episode(ep) for ep in episodes]

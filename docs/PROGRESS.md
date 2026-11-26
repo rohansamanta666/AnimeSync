@@ -1,11 +1,11 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 11 (Authorized Anime Streaming & HLS Watch Together) — **COMPLETED (100%)**
+- **Current Phase**: Phase 10 (Enhancements, Cross-Device Voice, Presence Lifecycle & Room Management) — **COMPLETED (100%)**
 - **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
 - **Git Branch**: `main`
-- **Latest Commit**: Phase 11 Streaming Feature
-- **Overall Health**: 100% Healthy & Clean (0 failing tests, 85 backend tests passing, 104 frontend tests passing, 0 TypeScript errors, Vite production build successful)
+- **Latest Commit**: Checkpoint & Phase 10 enhancements
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 80 backend tests passing, 102 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
@@ -25,7 +25,6 @@
 | **Phase 8** | Watch-Room Polish & Customization | **COMPLETED** | 100% |
 | **Phase 9** | Testing, Security & Free Deployment | **COMPLETED** | 100% |
 | **Phase 10** | Voice Cross-Device, Presence Lifecycle & Room Management | **COMPLETED** | 100% |
-| **Phase 11** | Authorized Anime Streaming & HLS Watch Together | **COMPLETED** | 100% |
 
 ---
 
@@ -340,20 +339,6 @@
 
 ---
 
-### Phase 11: Authorized Anime Streaming & HLS Watch Together
-- [x] **Task 11.1: Backend Streaming Catalog & URL Validation (`streaming_service.py`, `api/streaming.py`, `episode.py`, `database.py`)**:
-  - Built-in authorized Creative Commons / open-licensed catalog (`Sintel`, `Tears of Steel`, `Big Buck Bunny`) + AniList public GraphQL metadata search (no API keys required) + optional `STREAMING_CATALOG_URL`.
-  - Safe URL validation (`http://` / `https://` only, blocking `javascript:`, `file:`, and link-local IPs) and format detection (`hls`, `mp4`, `webm`).
-  - Extended `Episode` model with `source_type` (`local` | `stream`), `stream_url`, and `subtitle_url` with safe SQLite auto-migration.
-- [x] **Task 11.2: Watch-Together Stream Mode Integration (`api/rooms.py`, `sockets/server.py`, `RoomPage.tsx`)**:
-  - Added `POST /api/rooms/{code}/stream-episode` (host-only) to attach and activate authorized stream episodes.
-  - Updated `playback_action`, `buffering_start`, and `select_episode` to allow synchronized playback without local file hashing when `source_type == "stream"`, preserving local-file mode 100% intact.
-- [x] **Task 11.3: HLS Video Player & `/stream` Browsing Section (`StreamVideoPlayer.tsx`, `StreamPage.tsx`, `Navbar.tsx`)**:
-  - Built `StreamVideoPlayer` with `hls.js` + native Safari HLS fallback, `.vtt`/`.srt` subtitle support, playback position persistence in `localStorage`, error recovery, and `VideoPlayerHandle` compatibility.
-  - Built `/stream` page with search bar, anime details, episode list, authorized URL input, and one-click **Watch Together** room creation.
-
----
-
 ## 4. In-Progress Features
 - None (All 10 Phases are 100% complete).
 
@@ -388,7 +373,6 @@
 - `backend/tests/test_media.py` (4 tests) — **PASSED**
 - `backend/tests/test_security_and_e2e.py` (5 tests, Phase 9) — **PASSED**
 - `backend/tests/test_kick_and_presence.py` (7 tests, Phase 10) — **PASSED**
-- `backend/tests/test_streaming.py` (5 tests, Phase 11) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
@@ -398,9 +382,8 @@
 - `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
 - `frontend/tests/playback_sync_fixes.test.ts` (9 unit tests) — **PASSED**
 - `frontend/tests/voice_and_presence.test.ts` (6 unit tests, Phase 10) — **PASSED**
-- `frontend/tests/streaming.test.ts` (2 unit tests, Phase 11) — **PASSED**
-- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED**
-- Master test runner `./scripts/test.sh` — **PASSED** (All 85 backend tests + 104 frontend unit tests + Vite build)
+- `npm run build` (TypeScript compilation & Vite bundle) — **PASSED** (2,132 modules transformed, 0 errors)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 80 backend tests + 102 frontend unit tests + Vite build)
 
 ---
 

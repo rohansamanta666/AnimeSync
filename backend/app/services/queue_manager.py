@@ -37,9 +37,6 @@ class QueueManager:
             "duration_seconds": ep.duration_seconds,
             "upload_status": ep.upload_status.value if hasattr(ep.upload_status, "value") else str(ep.upload_status),
             "queue_position": ep.queue_position,
-            "source_type": getattr(ep, "source_type", "local") or "local",
-            "stream_url": getattr(ep, "stream_url", None),
-            "subtitle_url": getattr(ep, "subtitle_url", None),
             "created_at": ep.created_at.isoformat() if ep.created_at else None,
         }
 
