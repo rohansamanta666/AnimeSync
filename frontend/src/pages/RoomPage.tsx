@@ -38,6 +38,7 @@ import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationC
 import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
 import { VideoPlayer, VideoPlayerHandle } from '../components/video/VideoPlayer';
+import { StreamVideoPlayer } from '../components/video/StreamVideoPlayer';
 import { SyncHealthBadge } from '../components/video/SyncHealthBadge';
 import { useEpisodeQueue } from '../hooks/useEpisodeQueue';
 import { EpisodeQueue } from '../components/queue/EpisodeQueue';
@@ -137,10 +138,41 @@ export const RoomPage: React.FC = () => {
     acknowledgePlayback,
   } = useReadyState(socket, earlyCurrentParticipant?.status);
 
+  // Phase 6: Episode Queue, Video Ended & Auto-Next Coordination Hook
+  const {
+    queue,
+    currentEpisodeId: queueCurrentEpisodeId,
+    intermission,
+    isQueueFinished,
+    handleVideoEnded,
+    handleReorderQueue,
+    handleRemoveEpisode,
+    handleSelectEpisode,
+    handleSkipIntermission,
+    handleCancelIntermission,
+    setIsQueueFinished,
+  } = useEpisodeQueue({
+    socket,
+    auth,
+    initialEpisodes: initialRoom?.episodes || [],
+    initialCurrentEpisodeId: initialRoom?.current_episode_id,
+    onEpisodeAdvanced: () => {
+      setLocalVideoFile(null);
+    },
+  });
+
   // Phase 5 Task 5.3: Client-to-Server Playback Controls & Sequence Loop Prevention
+  const activeEpisodeForSync =
+    (queue.length > 0 ? queue : room?.episodes || initialRoom?.episodes || []).find(
+      (e) => e.id === (queueCurrentEpisodeId || room?.current_episode_id || initialRoom?.current_episode_id)
+    ) || null;
+  const isStreamEpisodeActive =
+    activeEpisodeForSync?.source_type === 'stream' && Boolean(activeEpisodeForSync?.stream_url);
+
   const isSyncAllowed =
     !!auth &&
-    (earlyCurrentParticipant?.status === 'READY' ||
+    (isStreamEpisodeActive ||
+      earlyCurrentParticipant?.status === 'READY' ||
       earlyCurrentParticipant?.status === 'WATCHING' ||
       earlyCurrentParticipant?.status === 'VERIFIED');
 
@@ -164,29 +196,6 @@ export const RoomPage: React.FC = () => {
     playerRef: videoPlayerRef,
     roomCode: room?.code,
     isEnabled: isSyncAllowed,
-  });
-
-  // Phase 6: Episode Queue, Video Ended & Auto-Next Coordination Hook
-  const {
-    queue,
-    currentEpisodeId: queueCurrentEpisodeId,
-    intermission,
-    isQueueFinished,
-    handleVideoEnded,
-    handleReorderQueue,
-    handleRemoveEpisode,
-    handleSelectEpisode,
-    handleSkipIntermission,
-    handleCancelIntermission,
-    setIsQueueFinished,
-  } = useEpisodeQueue({
-    socket,
-    auth,
-    initialEpisodes: initialRoom?.episodes || [],
-    initialCurrentEpisodeId: initialRoom?.current_episode_id,
-    onEpisodeAdvanced: () => {
-      setLocalVideoFile(null);
-    },
   });
 
   // Phase 7: Real-time Text Chat Hook
@@ -816,38 +825,71 @@ export const RoomPage: React.FC = () => {
               />
             )}
 
-            {/* Phase 5: HTML5 Local Video Player Stage with Real-Time Sync */}
+            {/* Phase 5 / Streaming: Video Player Stage with Real-Time Sync */}
             {currentEpisode ? (
-              <VideoPlayer
-                ref={videoPlayerRef}
-                file={localVideoFile}
-                animeTitle={currentEpisode.anime_title}
-                episodeNumber={currentEpisode.episode_number}
-                onFileSelect={(file) => setLocalVideoFile(file)}
-                onPlay={handlePlay}
-                onPause={handlePause}
-                onSeek={handleSeek}
-                onPlaybackRateChange={handlePlaybackRateChange}
-                onBufferingStart={handleBufferingStart}
-                onBufferingEnd={handleBufferingEnd}
-                bufferingParticipants={bufferingParticipants}
-                onResync={handleResync}
-                isResyncing={isResyncing}
-                syncStatus={syncStatus}
-                latencyMs={latencyMs}
-                driftSeconds={driftSeconds}
-                onEnded={handleVideoEnded}
-                isTheaterMode={isTheaterMode}
-                onToggleTheaterMode={() => {
-                  const next = !isTheaterMode;
-                  setIsTheaterMode(next);
-                  if (next) {
-                    setIsSidebarCollapsed(true);
-                  }
-                }}
-                fullscreenOverlay={fullscreenCommunicationContent}
-                unreadCount={unreadMessages}
-              />
+              currentEpisode.source_type === 'stream' && currentEpisode.stream_url ? (
+                <StreamVideoPlayer
+                  ref={videoPlayerRef}
+                  streamUrl={currentEpisode.stream_url}
+                  subtitleUrl={currentEpisode.subtitle_url}
+                  animeTitle={currentEpisode.anime_title}
+                  episodeNumber={currentEpisode.episode_number}
+                  persistKey={`room_${room.code}_${currentEpisode.id}`}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onSeek={handleSeek}
+                  onPlaybackRateChange={handlePlaybackRateChange}
+                  onBufferingStart={handleBufferingStart}
+                  onBufferingEnd={handleBufferingEnd}
+                  bufferingParticipants={bufferingParticipants}
+                  onResync={handleResync}
+                  isResyncing={isResyncing}
+                  syncStatus={syncStatus}
+                  latencyMs={latencyMs}
+                  driftSeconds={driftSeconds}
+                  onEnded={handleVideoEnded}
+                  isTheaterMode={isTheaterMode}
+                  onToggleTheaterMode={() => {
+                    const next = !isTheaterMode;
+                    setIsTheaterMode(next);
+                    if (next) {
+                      setIsSidebarCollapsed(true);
+                    }
+                  }}
+                  fullscreenOverlay={fullscreenCommunicationContent}
+                />
+              ) : (
+                <VideoPlayer
+                  ref={videoPlayerRef}
+                  file={localVideoFile}
+                  animeTitle={currentEpisode.anime_title}
+                  episodeNumber={currentEpisode.episode_number}
+                  onFileSelect={(file) => setLocalVideoFile(file)}
+                  onPlay={handlePlay}
+                  onPause={handlePause}
+                  onSeek={handleSeek}
+                  onPlaybackRateChange={handlePlaybackRateChange}
+                  onBufferingStart={handleBufferingStart}
+                  onBufferingEnd={handleBufferingEnd}
+                  bufferingParticipants={bufferingParticipants}
+                  onResync={handleResync}
+                  isResyncing={isResyncing}
+                  syncStatus={syncStatus}
+                  latencyMs={latencyMs}
+                  driftSeconds={driftSeconds}
+                  onEnded={handleVideoEnded}
+                  isTheaterMode={isTheaterMode}
+                  onToggleTheaterMode={() => {
+                    const next = !isTheaterMode;
+                    setIsTheaterMode(next);
+                    if (next) {
+                      setIsSidebarCollapsed(true);
+                    }
+                  }}
+                  fullscreenOverlay={fullscreenCommunicationContent}
+                  unreadCount={unreadMessages}
+                />
+              )
             ) : (
               <div className="aspect-video bg-void-950 flex flex-col items-center justify-center p-8 text-center relative group">
                 <div className="w-20 h-20 rounded-2xl bg-void-800/80 border border-void-600/80 flex items-center justify-center mb-4 shadow-xl">
@@ -965,8 +1007,8 @@ export const RoomPage: React.FC = () => {
             </div>
           </Card>
 
-          {/* Phase 3: Video Distribution & Verification Card */}
-          {currentEpisode && auth && (
+          {/* Phase 3: Video Distribution & Verification Card (Local-file mode only) */}
+          {currentEpisode && auth && currentEpisode.source_type !== 'stream' && (
             <EpisodeVerificationCard
               episode={currentEpisode}
               auth={auth}

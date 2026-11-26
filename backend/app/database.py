@@ -29,9 +29,16 @@ async def get_db():
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        try:
-            from sqlalchemy import text
-            await conn.execute(text("ALTER TABLE participants ADD COLUMN is_kicked BOOLEAN DEFAULT 0;"))
-        except Exception:
-            pass
+        from sqlalchemy import text
+        migrations = [
+            "ALTER TABLE participants ADD COLUMN is_kicked BOOLEAN DEFAULT 0;",
+            "ALTER TABLE episodes ADD COLUMN source_type VARCHAR(20) DEFAULT 'local' NOT NULL;",
+            "ALTER TABLE episodes ADD COLUMN stream_url VARCHAR(2000);",
+            "ALTER TABLE episodes ADD COLUMN subtitle_url VARCHAR(2000);",
+        ]
+        for stmt in migrations:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass
 

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/common/Navbar';
 import { LandingPage } from './pages/LandingPage';
 import { RoomPage } from './pages/RoomPage';
+import { StreamPage } from './pages/StreamPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { CreateRoomModal } from './components/room/CreateRoomModal';
 import { JoinRoomModal } from './components/room/JoinRoomModal';
@@ -22,6 +23,7 @@ export const App: React.FC = () => {
         <main className="flex-1">
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/stream" element={<StreamPage />} />
             <Route path="/room/:code" element={<RoomPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Routes>

@@ -47,6 +47,9 @@ export interface Episode {
   duration_seconds?: number | null;
   upload_status: UploadStatus;
   queue_position: number;
+  source_type?: 'local' | 'stream';
+  stream_url?: string | null;
+  subtitle_url?: string | null;
 }
 
 export interface Room {
@@ -226,4 +229,41 @@ export interface MediaPurgeResponse {
   message: string;
   freed_bytes: number;
   purged_count: number;
+}
+
+export interface StreamEpisodeItem {
+  episode_number: number;
+  title: string;
+  stream_url?: string | null;
+  subtitle_url?: string | null;
+  format?: 'hls' | 'mp4' | 'webm' | 'unknown' | null;
+}
+
+export interface StreamAnimeItem {
+  id: string;
+  source: 'authorized_catalog' | 'anilist' | string;
+  title: string;
+  native_title?: string | null;
+  description: string;
+  cover_image?: string | null;
+  banner_image?: string | null;
+  genres: string[];
+  episodes_count: number;
+  status: string;
+  episodes: StreamEpisodeItem[];
+}
+
+export interface StreamSearchResponse {
+  query: string;
+  count: number;
+  results: StreamAnimeItem[];
+}
+
+export interface StreamValidateResponse {
+  valid: boolean;
+  stream_url: string;
+  format: 'hls' | 'mp4' | 'webm' | 'unknown';
+  subtitle_url?: string | null;
+  reachable?: boolean | null;
+  content_type?: string | null;
 }

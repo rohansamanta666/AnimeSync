@@ -9,6 +9,9 @@ import {
   MediaStorageResponse,
   MediaDeleteResponse,
   MediaPurgeResponse,
+  StreamSearchResponse,
+  StreamAnimeItem,
+  StreamValidateResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -318,6 +321,56 @@ export const api = {
         'X-Participant-ID': pid,
         'X-Session-Token': token,
       },
+    });
+  },
+
+  // Streaming Catalog & Authorized Stream Integration
+  async searchStreaming(query: string, limit = 12): Promise<StreamSearchResponse> {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    return request<StreamSearchResponse>(`/streaming/search?${params.toString()}`);
+  },
+
+  async getStreamingAnime(animeId: string): Promise<StreamAnimeItem> {
+    return request<StreamAnimeItem>(`/streaming/anime/${encodeURIComponent(animeId)}`);
+  },
+
+  async validateStreamUrl(
+    streamUrl: string,
+    subtitleUrl?: string | null,
+    probe = false
+  ): Promise<StreamValidateResponse> {
+    return request<StreamValidateResponse>('/streaming/validate-url', {
+      method: 'POST',
+      body: JSON.stringify({
+        stream_url: streamUrl,
+        subtitle_url: subtitleUrl || null,
+        probe,
+      }),
+    });
+  },
+
+  async addStreamEpisode(
+    roomCode: string,
+    payload: {
+      anime_title: string;
+      season?: number;
+      episode_number: number;
+      display_title?: string;
+      stream_url: string;
+      subtitle_url?: string | null;
+      set_active?: boolean;
+    },
+    auth: { participantId?: string; participant_id?: string; sessionToken?: string; session_token?: string }
+  ): Promise<{ episode: Episode; current_episode_id: string | null; episodes: Episode[] }> {
+    const pid = auth.participant_id || auth.participantId || '';
+    const token = auth.session_token || auth.sessionToken || '';
+    return request(`/rooms/${roomCode.toUpperCase()}/stream-episode`, {
+      method: 'POST',
+      headers: {
+        'X-Participant-ID': pid,
+        'X-Session-Token': token,
+      },
+      body: JSON.stringify(payload),
     });
   },
 };

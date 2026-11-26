@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     DRIFT_RATE_ADJUST_THRESHOLD: float = 1.5
     DRIFT_HARD_SEEK_THRESHOLD: float = 3.0
 
+    # Authorized Streaming Catalog / Metadata
+    ANILIST_API_URL: str = "https://graphql.anilist.co"
+    STREAMING_CATALOG_URL: str = ""
+
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
