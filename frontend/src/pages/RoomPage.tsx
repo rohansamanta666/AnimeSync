@@ -40,7 +40,7 @@ import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationC
 import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
 import { VideoPlayer, VideoPlayerHandle } from '../components/video/VideoPlayer';
-import { OnlineVideoPlayer } from '../components/video/OnlineVideoPlayer';
+import { OnlineVideoPlayer, isDirectMediaStreamUrl } from '../components/video/OnlineVideoPlayer';
 import { SyncHealthBadge } from '../components/video/SyncHealthBadge';
 import { useEpisodeQueue } from '../hooks/useEpisodeQueue';
 import { EpisodeQueue } from '../components/queue/EpisodeQueue';
@@ -837,13 +837,13 @@ export const RoomPage: React.FC = () => {
                   subtitleUrl={currentEpisode.subtitle_url}
                   animeTitle={currentEpisode.anime_title}
                   episodeNumber={currentEpisode.episode_number}
-                  persistKey={`room_${room.code}_${currentEpisode.id}`}
                   onPlay={handlePlay}
                   onPause={handlePause}
                   onSeek={handleSeek}
                   onPlaybackRateChange={handlePlaybackRateChange}
                   onBufferingStart={handleBufferingStart}
                   onBufferingEnd={handleBufferingEnd}
+                  onReady={handleResync}
                   bufferingParticipants={bufferingParticipants}
                   onResync={handleResync}
                   isResyncing={isResyncing}
@@ -946,7 +946,11 @@ export const RoomPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-ink-muted">Your Status:</span>
                     {isOnlineEpisodeActive ? (
-                      <Badge variant="green">Online Stream Ready</Badge>
+                      isDirectMediaStreamUrl(currentEpisode?.stream_url) ? (
+                        <Badge variant="green">Synced HLS Stream</Badge>
+                      ) : (
+                        <Badge variant="amber">Embed Only (Use Stream Anime → s-3 for Sync)</Badge>
+                      )
                     ) : (
                       <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
                     )}

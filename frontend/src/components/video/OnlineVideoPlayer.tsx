@@ -66,6 +66,7 @@ export interface OnlineVideoPlayerProps {
   onBufferingStart?: () => void;
   onBufferingEnd?: () => void;
   onEnded?: () => void;
+  onReady?: () => void;
   onPlaybackError?: () => void;
   onSwitchNextServer?: () => void;
   nextServerLabel?: string | null;
@@ -102,6 +103,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
       onBufferingStart,
       onBufferingEnd,
       onEnded,
+      onReady,
       onPlaybackError,
       onSwitchNextServer,
       nextServerLabel = null,
@@ -366,6 +368,8 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           // ignore storage errors
         }
       }
+
+      onReady?.();
     };
 
     const togglePlay = () => {

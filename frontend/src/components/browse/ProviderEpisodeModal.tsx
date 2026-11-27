@@ -77,34 +77,35 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
           mal: ep.mal_id,
           fx,
         },
-        false
+        true
       );
-      const priority: Record<string, number> = { 's-1': 0, 's-2': 1, 's-3': 2, 's-4': 3 };
-      const list = [...(res.servers || [])].sort((a, b) => {
-        const pa = priority[(a.serverName || '').toLowerCase()] ?? 99;
-        const pb = priority[(b.serverName || '').toLowerCase()] ?? 99;
-        return pa - pb;
-      });
+      const list = res.servers || [];
       setServers(list);
-      const first = list[0] || null;
-      setSelectedServer(first);
-      if (first) {
-        const name = (first.serverName || '').toLowerCase();
-        if (name === 's-3' || name === 's-4' || first.iframe.toLowerCase().includes('novuscloud')) {
-          try {
-            const r = await api.resolveProviderStream(first.iframe);
-            if (r.mode === 'stream' && (r.proxy_stream_url || r.stream_url)) {
-              setResolvedStreamUrl(r.proxy_stream_url || r.stream_url || first.iframe);
-              setResolvedSubtitleUrl(r.subtitle_url || r.subtitles?.[0] || null);
-              return;
-            }
-          } catch {
-            // fallback to iframe
-          }
-        }
-        setResolvedStreamUrl(first.iframe);
+
+      // Watch Together rooms require a Direct HLS/MP4 stream for Play/Pause/Seek sync
+      if (res.direct?.stream_url) {
+        const match =
+          list.find(
+            (s) =>
+              s.serverName === res.direct?.serverName ||
+              s.iframe === res.direct?.iframe_url
+          ) ||
+          list[0] ||
+          null;
+        setSelectedServer(match);
+        setResolvedStreamUrl(res.direct.stream_url);
+        setResolvedSubtitleUrl(res.direct.subtitle_url || null);
       } else {
-        setErrorMsg(`No ${track.toUpperCase()} servers available for this episode.`);
+        const first = list[0] || null;
+        setSelectedServer(first);
+        setResolvedStreamUrl(first?.iframe || null);
+        if (first) {
+          setErrorMsg(
+            'No Direct HLS stream found for this episode; embed fallback cannot auto-sync play/pause.'
+          );
+        } else {
+          setErrorMsg(`No ${track.toUpperCase()} servers available for this episode.`);
+        }
       }
     } catch (err: any) {
       setServers([]);
@@ -308,6 +309,23 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
                     <span className="text-xs font-semibold text-white flex items-center gap-1.5">
                       <Server className="w-3.5 h-3.5 text-violet-400" />
                       Episode {selectedEp.episode_number} Servers
+                      {resolvedStreamUrl && (
+                        <span
+                          className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                            resolvedStreamUrl.startsWith('/api/browse/stream-proxy') ||
+                            resolvedStreamUrl.toLowerCase().includes('.m3u8') ||
+                            resolvedStreamUrl.toLowerCase().includes('.mp4')
+                              ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
+                              : 'bg-amber-950/80 border-amber-700 text-amber-300'
+                          }`}
+                        >
+                          {resolvedStreamUrl.startsWith('/api/browse/stream-proxy') ||
+                          resolvedStreamUrl.toLowerCase().includes('.m3u8') ||
+                          resolvedStreamUrl.toLowerCase().includes('.mp4')
+                            ? 'Synced HLS'
+                            : 'Embed Only (No Sync)'}
+                        </span>
+                      )}
                     </span>
 
                     <div className="inline-flex rounded-lg bg-void-900 border border-void-700 p-0.5 text-[11px]">

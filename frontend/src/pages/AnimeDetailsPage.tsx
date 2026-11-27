@@ -302,6 +302,29 @@ export const AnimeDetailsPage: React.FC = () => {
     if (!anime || !selectedEp) return;
     setIsCreatingRoom(true);
     try {
+      let syncStreamUrl = streamUrl;
+      let syncSubtitleUrl = subtitleUrl;
+
+      // Watch Together requires a Direct HLS/MP4 stream for Play/Pause/Seek sync;
+      // if currently playing an iframe embed (e.g. s-1), resolve a syncable Direct HLS server automatically.
+      if (!isDirectMediaStreamUrl(syncStreamUrl) && selectedEp.episode_id) {
+        try {
+          const fx = audioType === 'dub' ? selectedEp.fx_dub : selectedEp.fx_sub;
+          const res = await api.getProviderServers(
+            selectedEp.episode_id,
+            audioType,
+            { ani: selectedEp.ani_id, mal: selectedEp.mal_id, fx },
+            true
+          );
+          if (res.direct?.stream_url) {
+            syncStreamUrl = res.direct.stream_url;
+            syncSubtitleUrl = res.direct.subtitle_url || syncSubtitleUrl;
+          }
+        } catch {
+          // Keep current streamUrl if direct resolution fails
+        }
+      }
+
       const roomName = `${anime.title.slice(0, 38)} — Ep ${selectedEp.episode_number}`;
       const auth = await api.createRoom(roomName, chosenHostName || 'Host');
       sessionStore.save(auth.room.code, auth);
@@ -313,8 +336,8 @@ export const AnimeDetailsPage: React.FC = () => {
           season: 1,
           episode_number: selectedEp.episode_number,
           display_title: selectedEp.title,
-          stream_url: streamUrl,
-          subtitle_url: subtitleUrl,
+          stream_url: syncStreamUrl,
+          subtitle_url: syncSubtitleUrl,
           set_active: true,
         },
         {

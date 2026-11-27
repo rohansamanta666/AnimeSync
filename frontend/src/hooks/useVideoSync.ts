@@ -341,20 +341,43 @@ export function useVideoSync({
           playback_speed?: number;
           updated_at?: number;
           sequence_number?: number;
+          paused_for_buffering?: boolean;
         };
       }) => {
         if (res?.status === 'OK' && res.state) {
           const st = res.state;
           const rate = typeof st.playback_speed === 'number' ? st.playback_speed : 1.0;
-          userPlaybackRateRef.current = rate;
-          authoritativeSnapshotRef.current = {
+          const currentTime = typeof st.current_time === 'number' ? st.current_time : 0;
+          const updatedAt = typeof st.updated_at === 'number' ? st.updated_at : Date.now() / 1000;
+          const seq = st.sequence_number ?? 0;
+          const snapshot: AuthoritativePlaybackSnapshot = {
             isPlaying: !!st.is_playing,
-            currentTime: typeof st.current_time === 'number' ? st.current_time : 0,
+            currentTime,
             playbackSpeed: rate,
-            updatedAt: typeof st.updated_at === 'number' ? st.updated_at : Date.now() / 1000,
-            serverSequence: st.sequence_number ?? 0,
+            updatedAt,
+            serverSequence: seq,
             localReceivedAt: Date.now(),
           };
+          userPlaybackRateRef.current = rate;
+          authoritativeSnapshotRef.current = snapshot;
+          lastAppliedSequenceRef.current = seq;
+          setCurrentSequence(seq);
+
+          const player = playerRef.current;
+          if (player && player.getVideoElement()) {
+            isApplyingRemoteRef.current = true;
+            const target = calculateResyncTarget(snapshot, Date.now() / 1000);
+            if (target.targetTime > 0) {
+              player.seek(target.targetTime);
+            }
+            player.setPlaybackRate(target.targetRate);
+            if (target.isPlaying && !st.paused_for_buffering) {
+              player.play().catch((err) => console.warn('Initial sync play error:', err));
+            }
+            setTimeout(() => {
+              isApplyingRemoteRef.current = false;
+            }, 150);
+          }
         }
       }
     );
