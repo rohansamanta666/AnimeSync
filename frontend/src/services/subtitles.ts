@@ -167,11 +167,101 @@ export function parseVTT(content: string): SubtitleCue[] {
 }
 
 /**
- * Auto-detects format (VTT or SRT) and parses subtitles.
+ * Parses ASS / SSA (SubStation Alpha) text into SubtitleCue items.
+ */
+export function parseASS(content: string): SubtitleCue[] {
+  if (!content) return [];
+  const normalized = content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalized.split('\n');
+  const cues: SubtitleCue[] = [];
+
+  let formatFields: string[] = [
+    'Layer',
+    'Start',
+    'End',
+    'Style',
+    'Name',
+    'MarginL',
+    'MarginR',
+    'MarginV',
+    'Effect',
+    'Text',
+  ];
+  let inEvents = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith('[')) {
+      inEvents = line.toLowerCase() === '[events]';
+      continue;
+    }
+    if (!inEvents && !line.startsWith('Dialogue:')) continue;
+
+    if (line.toLowerCase().startsWith('format:')) {
+      formatFields = line
+        .slice('format:'.length)
+        .split(',')
+        .map((f) => f.trim());
+      continue;
+    }
+
+    if (line.startsWith('Dialogue:')) {
+      const rest = line.slice('Dialogue:'.length).trimStart();
+      const parts: string[] = [];
+      let currentIdx = 0;
+      for (let i = 0; i < formatFields.length - 1; i++) {
+        const commaIdx = rest.indexOf(',', currentIdx);
+        if (commaIdx === -1) break;
+        parts.push(rest.slice(currentIdx, commaIdx).trim());
+        currentIdx = commaIdx + 1;
+      }
+      parts.push(rest.slice(currentIdx));
+
+      const startIdx = formatFields.findIndex((f) => f.toLowerCase() === 'start');
+      const endIdx = formatFields.findIndex((f) => f.toLowerCase() === 'end');
+      const textIdx = formatFields.findIndex((f) => f.toLowerCase() === 'text');
+      if (startIdx < 0 || endIdx < 0 || textIdx < 0 || parts.length <= textIdx) continue;
+
+      const startTime = parseTimestamp(parts[startIdx]);
+      const endTime = parseTimestamp(parts[endIdx]);
+      if (startTime === null || endTime === null || endTime <= startTime) continue;
+
+      const rawText = parts[textIdx]
+        .replace(/\\N/g, '\n')
+        .replace(/\\n/g, '\n')
+        .replace(/\\h/g, ' ');
+      const text = cleanSubtitleText(rawText);
+      if (!text) continue;
+
+      cues.push({
+        id: cues.length + 1,
+        startTime,
+        endTime,
+        text,
+      });
+    }
+  }
+
+  return cues;
+}
+
+/**
+ * Auto-detects format (ASS, VTT, or SRT) and parses subtitles.
  */
 export function parseSubtitles(content: string, filename?: string): SubtitleCue[] {
   if (!content) return [];
   const lowerName = (filename || '').toLowerCase();
+
+  if (
+    lowerName.endsWith('.ass') ||
+    lowerName.endsWith('.ssa') ||
+    content.includes('[Script Info]') ||
+    content.includes('Dialogue:')
+  ) {
+    const assCues = parseASS(content);
+    if (assCues.length > 0) return assCues;
+  }
 
   if (lowerName.endsWith('.vtt') || content.trim().startsWith('WEBVTT')) {
     const vttCues = parseVTT(content);

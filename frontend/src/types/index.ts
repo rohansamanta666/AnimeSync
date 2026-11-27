@@ -233,12 +233,30 @@ export interface MediaPurgeResponse {
 
 export interface BrowseEpisodeItem {
   episode_number: number;
+  episode_id?: string | null;
   title: string;
+  alternative_title?: string | null;
+  is_filler?: boolean;
+  sub?: boolean;
+  dub?: boolean;
+  embed_id?: string | null;
+  ani_id?: string | null;
+  mal_id?: string | null;
+  fx_sub?: string | null;
+  fx_dub?: string | null;
   stream_url?: string | null;
   subtitle_url?: string | null;
-  format?: 'hls' | 'mp4' | 'webm' | 'unknown' | null;
+  format?: 'hls' | 'mp4' | 'webm' | 'embed' | 'unknown' | null;
   downloadable?: boolean;
   audio_track?: 'sub' | 'dub' | string;
+}
+
+export interface BrowseAnimeSeason {
+  title?: string | null;
+  id?: string | null;
+  alternativeTitle?: string | null;
+  poster?: string | null;
+  isActive?: boolean;
 }
 
 export interface BrowseAnimeItem {
@@ -254,18 +272,28 @@ export interface BrowseAnimeItem {
   banner_image?: string | null;
   genres: string[];
   status: string;
+  type?: string | null;
+  age_rating?: string | null;
+  duration?: string | null;
+  premiered?: string | null;
   release_year?: number | null;
   rating?: number | null;
   episodes_count: number;
+  sub_count?: number | null;
+  dub_count?: number | null;
   duration_minutes?: number | null;
   studios?: string[];
   supports_sub_dub_selection?: boolean;
   episodes?: BrowseEpisodeItem[];
+  more_seasons?: BrowseAnimeSeason[];
+  related?: BrowseAnimeItem[];
+  recommended?: BrowseAnimeItem[];
 }
 
 export interface BrowsePageResponse {
   category?: string;
   query?: string;
+  source?: string;
   page: number;
   per_page: number;
   total: number;
@@ -274,6 +302,67 @@ export interface BrowsePageResponse {
   results: BrowseAnimeItem[];
   metadata_available: boolean;
   error?: string;
+}
+
+export interface ProviderHealthResponse {
+  available: boolean;
+  url: string;
+  status?: string;
+  environment?: string;
+  error?: string;
+}
+
+export interface ProviderSuggestionItem {
+  title: string | null;
+  alternativeTitle: string | null;
+  poster: string | null;
+  id: string | null;
+  aired: string | null;
+  type: string | null;
+  duration: string | null;
+}
+
+export interface ProviderServerEntry {
+  serverName: string | null;
+  serverId: string | null;
+  iframe: string;
+}
+
+export interface ProviderSubtitleTrack {
+  label: string;
+  format: string;
+  default: boolean;
+  url: string;
+  proxy_url: string;
+}
+
+export interface ProviderDirectStream {
+  serverName: string | null;
+  serverId: string | null;
+  stream_url: string;
+  raw_stream_url?: string | null;
+  format: string;
+  subtitle_url?: string | null;
+  tracks?: ProviderSubtitleTrack[];
+  iframe_url?: string | null;
+}
+
+export interface ProviderServersResponse {
+  episodeId: string;
+  type: 'sub' | 'dub';
+  servers: ProviderServerEntry[];
+  direct?: ProviderDirectStream | null;
+}
+
+export interface ProviderResolveResponse {
+  mode: 'stream' | 'iframe';
+  format: string;
+  iframe_url: string;
+  stream_url?: string | null;
+  proxy_stream_url?: string | null;
+  subtitle_url?: string | null;
+  subtitles: string[];
+  tracks?: ProviderSubtitleTrack[];
 }
 
 export interface ValidatedSourceResponse {

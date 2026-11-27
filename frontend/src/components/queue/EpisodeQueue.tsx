@@ -162,7 +162,9 @@ export const EpisodeQueue: React.FC<EpisodeQueueProps> = ({
                         S{ep.season}:E{ep.episode_number}
                       </span>
                       <span>•</span>
-                      <span>{formatBytes(ep.file_size_bytes)}</span>
+                      <span>
+                        {ep.source_type === 'online' ? 'ONLINE STREAM' : formatBytes(ep.file_size_bytes)}
+                      </span>
                       {isVerified && (
                         <>
                           <span>•</span>
@@ -177,8 +179,8 @@ export const EpisodeQueue: React.FC<EpisodeQueueProps> = ({
 
                 {/* Right: Actions */}
                 <div className="flex items-center gap-1 shrink-0">
-                  {/* Download button for peers/hosts who need to download upcoming episodes */}
-                  {onDownloadEpisode && !isCurrent && (
+                  {/* Download button for peers/hosts who need to download upcoming local episodes */}
+                  {onDownloadEpisode && !isCurrent && ep.source_type !== 'online' && (
                     <button
                       onClick={() => onDownloadEpisode(ep)}
                       className="p-1.5 rounded-lg text-ink-dim hover:text-cyan-400 hover:bg-void-800 transition-colors"

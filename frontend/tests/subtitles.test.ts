@@ -8,6 +8,7 @@ import {
   cleanSubtitleText,
   parseSRT,
   parseVTT,
+  parseASS,
   parseSubtitles,
   findActiveCues,
 } from '../src/services/subtitles.ts';
@@ -139,6 +140,23 @@ test('parseSubtitles - auto-detects SRT for .srt files', () => {
   const cues = parseSubtitles(srt, 'episode_01.srt');
   assert.equal(cues.length, 1);
   assert.equal(cues[0].text, 'SRT cue');
+});
+
+test('parseASS and parseSubtitles - parses ASS/SSA dialogue events cleanly', () => {
+  const ass = `[Script Info]
+Title: Test
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:01.20,0:00:04.50,Default,,0,0,0,,{\\an8}I'm gonna be\\NKing of the Pirates!
+Dialogue: 0,0:00:05.00,0:00:08.00,Default,,0,0,0,,Second line
+`;
+  const cues = parseSubtitles(ass, '/api/browse/stream-proxy?url=track.ass');
+  assert.equal(cues.length, 2);
+  assert.equal(cues[0].startTime, 1.2);
+  assert.equal(cues[0].endTime, 4.5);
+  assert.equal(cues[0].text, "I'm gonna be\nKing of the Pirates!");
+  assert.equal(parseASS(ass).length, 2);
 });
 
 // ---------------------------------------------------------------------------

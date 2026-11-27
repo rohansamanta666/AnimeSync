@@ -14,6 +14,10 @@ import {
   ValidatedSourceResponse,
   DownloadTaskItem,
   DownloadListResponse,
+  ProviderHealthResponse,
+  ProviderSuggestionItem,
+  ProviderServersResponse,
+  ProviderResolveResponse,
 } from '../types';
 
 const API_BASE = '/api';
@@ -330,27 +334,116 @@ export const api = {
   async discoverAnime(
     category: 'trending' | 'popular' | 'recent' = 'trending',
     page = 1,
-    perPage = 18
+    perPage = 18,
+    source: 'auto' | 'provider' | 'anilist' = 'auto'
   ): Promise<BrowsePageResponse> {
     const params = new URLSearchParams({
       category,
       page: String(page),
       per_page: String(perPage),
+      source,
     });
     return request<BrowsePageResponse>(`/browse/discover?${params.toString()}`);
   },
 
-  async searchBrowseAnime(query: string, page = 1, perPage = 18): Promise<BrowsePageResponse> {
+  async searchBrowseAnime(
+    query: string,
+    page = 1,
+    perPage = 18,
+    source: 'auto' | 'provider' | 'anilist' = 'auto'
+  ): Promise<BrowsePageResponse> {
     const params = new URLSearchParams({
       q: query,
       page: String(page),
       per_page: String(perPage),
+      source,
     });
     return request<BrowsePageResponse>(`/browse/search?${params.toString()}`);
   },
 
   async getBrowseAnimeDetails(animeId: string): Promise<BrowseAnimeItem> {
     return request<BrowseAnimeItem>(`/browse/anime/${encodeURIComponent(animeId)}`);
+  },
+
+  // Integrated Anime Provider API
+  async getProviderHealth(): Promise<ProviderHealthResponse> {
+    return request<ProviderHealthResponse>('/provider/health');
+  },
+
+  async getProviderHome(): Promise<Record<string, any>> {
+    return request<Record<string, any>>('/provider/home');
+  },
+
+  async searchProviderAnime(keyword: string, page = 1): Promise<BrowsePageResponse> {
+    const params = new URLSearchParams({ keyword, page: String(page) });
+    return request<BrowsePageResponse>(`/provider/search?${params.toString()}`);
+  },
+
+  async getProviderSuggestions(keyword: string): Promise<{ suggestions: ProviderSuggestionItem[] }> {
+    const params = new URLSearchParams({ keyword });
+    return request<{ suggestions: ProviderSuggestionItem[] }>(`/provider/suggestion?${params.toString()}`);
+  },
+
+  async listProviderAnime(
+    query: string,
+    category?: string,
+    page = 1
+  ): Promise<{
+    query: string;
+    category?: string | null;
+    page: number;
+    last_page: number;
+    has_next_page: boolean;
+    results: BrowseAnimeItem[];
+    genres?: string[];
+  }> {
+    const path = category
+      ? `/provider/animes/${encodeURIComponent(query)}/${encodeURIComponent(category)}?page=${page}`
+      : `/provider/animes/${encodeURIComponent(query)}?page=${page}`;
+    return request(path);
+  },
+
+  async getProviderGenres(): Promise<{ genres: string[] }> {
+    return request<{ genres: string[] }>('/provider/genres');
+  },
+
+  async getProviderTopSearch(): Promise<{ results: Array<{ title: string; link: string; id: string | null }> }> {
+    return request('/provider/top-search');
+  },
+
+  async getProviderRandom(): Promise<{ id: string }> {
+    return request<{ id: string }>('/provider/random');
+  },
+
+  async getProviderEpisodes(animeId: string): Promise<{ anime_id: string; episodes: any[] }> {
+    return request(`/provider/episodes/${encodeURIComponent(animeId)}`);
+  },
+
+  async getProviderServers(
+    episodeId: string,
+    type: 'sub' | 'dub' = 'sub',
+    meta?: { ani?: string | null; mal?: string | null; fx?: string | null },
+    resolve = true
+  ): Promise<ProviderServersResponse> {
+    const params = new URLSearchParams({ type });
+    if (meta?.ani) params.set('ani', meta.ani);
+    if (meta?.mal) params.set('mal', meta.mal);
+    if (meta?.fx) params.set('fx', meta.fx);
+    if (resolve) params.set('resolve', 'true');
+    return request<ProviderServersResponse>(
+      `/provider/servers/${encodeURIComponent(episodeId)}?${params.toString()}`
+    );
+  },
+
+  async resolveProviderStream(iframeUrl: string): Promise<ProviderResolveResponse> {
+    const params = new URLSearchParams({ iframe_url: iframeUrl });
+    return request<ProviderResolveResponse>(`/provider/resolve?${params.toString()}`);
+  },
+
+  getStreamProxyUrl(url: string, referer?: string | null): string {
+    const params = new URLSearchParams({ url });
+    if (referer) params.set('referer', referer);
+    return `${API_BASE}/browse/stream-proxy?${params.toString()}`;
   },
 
   async getProviderCatalog(): Promise<{ count: number; results: BrowseAnimeItem[] }> {

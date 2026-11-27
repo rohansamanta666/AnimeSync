@@ -41,8 +41,13 @@ storage/videos/*
 !storage/videos/.gitkeep
 storage/uploads_temp/*
 !storage/uploads_temp/.gitkeep
+storage/downloads/*
+!storage/downloads/.gitkeep
 storage/*.log
 *.log
+
+# Compiled anime-provider Node bundle (auto-built by start.sh / provider_process)
+anime-provider/dist-node/
 
 # SQLite database
 *.sqlite3

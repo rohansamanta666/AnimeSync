@@ -88,8 +88,8 @@ Open `http://localhost:8000` in your browser.
 ## Testing & Quality Verification
 
 AnimeSync includes a comprehensive automated test suite and two-computer validation protocol:
-- **Backend Test Suite**: 73 Pytest tests passing 100% (`backend/tests/`) covering presence, chunked upload/download, SHA-256 verification, ready state gates, drift correction, buffering coordination, queue management, chat/voice signaling, media management, security traversal guards, and end-to-end watch party workflows.
-- **Frontend Test Suite**: 87 unit tests passing 100% (`frontend/tests/`) covering drift calculations, audio gain, speaking RMS detection, PTT keyup safety, subtitle parsing, queue reordering, and sync health badges.
+- **Backend Test Suite**: 92 Pytest tests passing 100% (`backend/tests/`) covering presence, chunked upload/download, SHA-256 verification, ready state gates, drift correction, buffering coordination, queue management, chat/voice signaling, media management, security traversal guards, integrated anime provider endpoints/stream proxy, and end-to-end watch party workflows.
+- **Frontend Test Suite**: 109 unit tests passing 100% (`frontend/tests/`) covering drift calculations, audio gain, speaking RMS detection, PTT keyup safety, SRT/VTT/ASS subtitle parsing, queue reordering, sync health badges, and online player/provider failover logic.
 - **Production Build**: Clean TypeScript compilation and Vite build (`tsc && vite build`).
 - **Master Test Runner**: Run all tests in one step:
   ```bash

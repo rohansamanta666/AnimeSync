@@ -32,6 +32,9 @@ class EpisodeResponse(BaseModel):
     duration_seconds: Optional[float] = None
     upload_status: str
     queue_position: int
+    source_type: str = "local"
+    stream_url: Optional[str] = None
+    subtitle_url: Optional[str] = None
 
 class RoomResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -94,6 +97,9 @@ class MediaEpisodeSchema(BaseModel):
     duration_seconds: Optional[float] = None
     upload_status: str
     queue_position: int
+    source_type: str = "local"
+    stream_url: Optional[str] = None
+    subtitle_url: Optional[str] = None
     created_at: Optional[datetime] = None
     is_active: bool
     file_exists_on_disk: bool

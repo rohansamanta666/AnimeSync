@@ -1,16 +1,47 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Flame, TrendingUp, Clock, Sparkles, ChevronLeft, ChevronRight, AlertCircle, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Flame,
+  TrendingUp,
+  Clock,
+  Sparkles,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
+  Loader2,
+  Captions,
+  Mic,
+  Film,
+  Radio,
+} from 'lucide-react';
 import { api } from '../services/api';
-import { BrowseAnimeItem } from '../types';
+import { BrowseAnimeItem, ProviderHealthResponse } from '../types';
 import { AnimeSearch } from '../components/browse/AnimeSearch';
 import { AnimeCard } from '../components/browse/AnimeCard';
 import { DownloadManager } from '../components/browse/DownloadManager';
 import { Button } from '../components/common/Button';
 
-type DiscoverCategory = 'trending' | 'popular' | 'recent';
+type ProviderCategory =
+  | 'top-airing'
+  | 'most-popular'
+  | 'recently-updated'
+  | 'subbed-anime'
+  | 'dubbed-anime'
+  | 'movie';
+
+const CATEGORY_TABS: Array<{ id: ProviderCategory; label: string; icon: React.ReactNode }> = [
+  { id: 'top-airing', label: 'Trending / Airing', icon: <Flame className="w-3.5 h-3.5" /> },
+  { id: 'most-popular', label: 'Most Popular', icon: <TrendingUp className="w-3.5 h-3.5" /> },
+  { id: 'recently-updated', label: 'Recently Updated', icon: <Clock className="w-3.5 h-3.5" /> },
+  { id: 'subbed-anime', label: 'Subbed', icon: <Captions className="w-3.5 h-3.5" /> },
+  { id: 'dubbed-anime', label: 'Dubbed', icon: <Mic className="w-3.5 h-3.5" /> },
+  { id: 'movie', label: 'Movies', icon: <Film className="w-3.5 h-3.5" /> },
+];
 
 export const BrowsePage: React.FC = () => {
-  const [category, setCategory] = useState<DiscoverCategory>('trending');
+  const navigate = useNavigate();
+  const [category, setCategory] = useState<ProviderCategory>('top-airing');
+  const [selectedGenre, setSelectedGenre] = useState<string>('');
   const [searchInput, setSearchInput] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -18,26 +49,75 @@ export const BrowsePage: React.FC = () => {
   const [results, setResults] = useState<BrowseAnimeItem[]>([]);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRandomLoading, setIsRandomLoading] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [activeSource, setActiveSource] = useState<string>('anime_provider');
 
+  const [providerHealth, setProviderHealth] = useState<ProviderHealthResponse | null>(null);
+  const [genres, setGenres] = useState<string[]>([]);
+  const [topSearches, setTopSearches] = useState<Array<{ title: string; link: string; id: string | null }>>([]);
   const [openCatalog, setOpenCatalog] = useState<BrowseAnimeItem[]>([]);
 
-  const fetchDiscoveryOrSearch = useCallback(
-    async (cat: DiscoverCategory, q: string, pageNum: number) => {
+  useEffect(() => {
+    api.getProviderHealth()
+      .then(setProviderHealth)
+      .catch(() => setProviderHealth({ available: false, url: '' }));
+
+    api.getProviderGenres()
+      .then((res) => setGenres(res.genres || []))
+      .catch(() => setGenres([]));
+
+    api.getProviderTopSearch()
+      .then((res) => setTopSearches((res.results || []).slice(0, 8)))
+      .catch(() => setTopSearches([]));
+
+    api.getProviderCatalog()
+      .then((res) => setOpenCatalog(res.results))
+      .catch(() => setOpenCatalog([]));
+  }, []);
+
+  const fetchCatalog = useCallback(
+    async (cat: ProviderCategory, genre: string, q: string, pageNum: number) => {
       setIsLoading(true);
       setMetadataError(null);
       try {
-        const res = q.trim()
-          ? await api.searchBrowseAnime(q.trim(), pageNum, 18)
-          : await api.discoverAnime(cat, pageNum, 18);
+        if (q.trim()) {
+          const res = await api.searchBrowseAnime(q.trim(), pageNum, 20, 'auto');
+          setResults(res.results);
+          setHasNextPage(res.has_next_page);
+          setActiveSource(res.source || 'anime_provider');
+          if (!res.metadata_available && res.error) {
+            setMetadataError(res.error);
+          }
+          return;
+        }
 
-        setResults(res.results);
-        setHasNextPage(res.has_next_page);
-        if (!res.metadata_available && res.error) {
-          setMetadataError(res.error);
+        if (genre) {
+          const res = await api.listProviderAnime('genre', genre, pageNum);
+          setResults(res.results);
+          setHasNextPage(res.has_next_page);
+          setActiveSource('anime_provider');
+          return;
+        }
+
+        try {
+          const res = await api.listProviderAnime(cat, undefined, pageNum);
+          setResults(res.results);
+          setHasNextPage(res.has_next_page);
+          setActiveSource('anime_provider');
+        } catch {
+          const fallbackCategory =
+            cat === 'top-airing' ? 'trending' : cat === 'recently-updated' ? 'recent' : 'popular';
+          const res = await api.discoverAnime(fallbackCategory, pageNum, 18, 'anilist');
+          setResults(res.results);
+          setHasNextPage(res.has_next_page);
+          setActiveSource('anilist');
+          if (!res.metadata_available && res.error) {
+            setMetadataError(res.error);
+          }
         }
       } catch (err: any) {
-        setMetadataError(err?.message || 'Failed to fetch anime metadata');
+        setMetadataError(err?.message || 'Failed to fetch anime catalog');
         setResults([]);
       } finally {
         setIsLoading(false);
@@ -47,23 +127,26 @@ export const BrowsePage: React.FC = () => {
   );
 
   useEffect(() => {
-    fetchDiscoveryOrSearch(category, activeQuery, page);
-  }, [category, activeQuery, page, fetchDiscoveryOrSearch]);
+    fetchCatalog(category, selectedGenre, activeQuery, page);
+  }, [category, selectedGenre, activeQuery, page, fetchCatalog]);
 
-  useEffect(() => {
-    api.getProviderCatalog()
-      .then((res) => setOpenCatalog(res.results))
-      .catch(() => setOpenCatalog([]));
-  }, []);
-
-  const handleCategoryChange = (nextCat: DiscoverCategory) => {
+  const handleCategoryChange = (nextCat: ProviderCategory) => {
     setActiveQuery('');
     setSearchInput('');
+    setSelectedGenre('');
     setCategory(nextCat);
     setPage(1);
   };
 
+  const handleGenreChange = (nextGenre: string) => {
+    setActiveQuery('');
+    setSearchInput('');
+    setSelectedGenre(nextGenre);
+    setPage(1);
+  };
+
   const handleSearchSubmit = (q: string) => {
+    setSelectedGenre('');
     setActiveQuery(q.trim());
     setPage(1);
   };
@@ -74,16 +157,48 @@ export const BrowsePage: React.FC = () => {
     setPage(1);
   };
 
+  const handleRandomAnime = async () => {
+    setIsRandomLoading(true);
+    try {
+      const res = await api.getProviderRandom();
+      if (res?.id) {
+        navigate(`/browse/${encodeURIComponent(res.id)}`);
+      }
+    } catch (err: any) {
+      setMetadataError(err?.message || 'Unable to load random anime');
+    } finally {
+      setIsRandomLoading(false);
+    }
+  };
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       {/* Header & Search */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-            Browse Anime
-          </h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+              Browse Anime
+            </h1>
+            {providerHealth && (
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono border ${
+                  providerHealth.available
+                    ? 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300'
+                    : 'bg-amber-950/70 border-amber-700/60 text-amber-300'
+                }`}
+              >
+                <Radio className="w-3 h-3" />
+                {providerHealth.available
+                  ? 'Provider Online'
+                  : activeSource === 'anilist'
+                  ? 'AniList Fallback'
+                  : 'Provider Offline'}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-ink-muted mt-1">
-            Discover anime via AniList metadata, or watch & download authorized media sources.
+            Search anime, browse episodes, stream directly in your browser, or launch a Watch Together room.
           </p>
         </div>
 
@@ -92,56 +207,86 @@ export const BrowsePage: React.FC = () => {
           onChange={setSearchInput}
           onSubmit={handleSearchSubmit}
           onClear={handleClearSearch}
+          onRandomClick={handleRandomAnime}
           isLoading={isLoading}
+          isRandomLoading={isRandomLoading}
         />
       </div>
 
-      {/* Category Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-void-800 pb-3">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleCategoryChange('trending')}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
-              !activeQuery && category === 'trending'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30'
-                : 'bg-void-900 text-ink-muted hover:text-white border border-void-800'
-            }`}
-          >
-            <Flame className="w-3.5 h-3.5" />
-            Trending
-          </button>
+      {/* Top Trending Search Pills */}
+      {topSearches.length > 0 && !activeQuery && (
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-ink-dim font-mono mr-1">Top searches:</span>
+          {topSearches.map((item) => (
+            <button
+              key={item.title}
+              type="button"
+              onClick={() => {
+                setSearchInput(item.title);
+                handleSearchSubmit(item.title);
+              }}
+              className="px-2.5 py-1 rounded-full bg-void-900 border border-void-800 text-ink-muted hover:text-white hover:border-violet-500/70 transition-colors text-[11px]"
+            >
+              {item.title}
+            </button>
+          ))}
+        </div>
+      )}
 
-          <button
-            type="button"
-            onClick={() => handleCategoryChange('popular')}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
-              !activeQuery && category === 'popular'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30'
-                : 'bg-void-900 text-ink-muted hover:text-white border border-void-800'
-            }`}
-          >
-            <TrendingUp className="w-3.5 h-3.5" />
-            Popular
-          </button>
+      {/* Category Tabs & Genre Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-void-800 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {CATEGORY_TABS.map((tab) => {
+            const active = !activeQuery && !selectedGenre && category === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => handleCategoryChange(tab.id)}
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  active
+                    ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30'
+                    : 'bg-void-900 text-ink-muted hover:text-white border border-void-800'
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            );
+          })}
 
-          <button
-            type="button"
-            onClick={() => handleCategoryChange('recent')}
-            className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors ${
-              !activeQuery && category === 'recent'
-                ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/30'
-                : 'bg-void-900 text-ink-muted hover:text-white border border-void-800'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            Recently Updated
-          </button>
+          {genres.length > 0 && (
+            <select
+              value={selectedGenre}
+              onChange={(e) => handleGenreChange(e.target.value)}
+              aria-label="Filter by genre"
+              className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-colors bg-void-900 ${
+                selectedGenre
+                  ? 'border-violet-500 text-violet-200'
+                  : 'border-void-800 text-ink-muted hover:text-white'
+              }`}
+            >
+              <option value="">All Genres</option>
+              {genres.map((g) => (
+                <option key={g} value={g}>
+                  {g.replace(/\b\w/g, (c) => c.toUpperCase())}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
-        {activeQuery && (
+        {(activeQuery || selectedGenre) && (
           <p className="text-xs text-ink-muted font-mono">
-            Showing results for "<span className="text-white">{activeQuery}</span>" (Page {page})
+            {activeQuery ? (
+              <>
+                Showing results for "<span className="text-white">{activeQuery}</span>" (Page {page})
+              </>
+            ) : (
+              <>
+                Genre: <span className="text-white capitalize">{selectedGenre}</span> (Page {page})
+              </>
+            )}
           </p>
         )}
       </div>
@@ -154,7 +299,7 @@ export const BrowsePage: React.FC = () => {
         </div>
       )}
 
-      {/* AniList Discovery / Search Grid */}
+      {/* Catalog Grid */}
       {isLoading ? (
         <div className="flex items-center justify-center py-16 text-ink-muted gap-2 text-sm">
           <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
@@ -162,7 +307,7 @@ export const BrowsePage: React.FC = () => {
         </div>
       ) : results.length === 0 ? (
         <div className="py-12 text-center text-sm text-ink-dim">
-          No anime metadata results found. Try another search or check the Open-Licensed Catalog below.
+          No anime results found. Try another search or check the Open-Licensed Catalog below.
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">

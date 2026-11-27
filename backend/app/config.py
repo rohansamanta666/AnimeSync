@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     ANILIST_API_URL: str = "https://graphql.anilist.co"
     SELF_HOSTED_CATALOG_URL: str = ""
 
+    # Integrated Anime Provider Server (anime-provider/)
+    ANIME_PROVIDER_URL: str = "http://127.0.0.1:5000"
+    ANIME_PROVIDER_PORT: int = 5000
+    ANIME_PROVIDER_AUTO_START: bool = True
+
     model_config = SettingsConfigDict(
         env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",

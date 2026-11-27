@@ -27,6 +27,9 @@ import {
   CaptionsOff,
   Loader2,
   Tv,
+  ExternalLink,
+  Shield,
+  ShieldAlert,
 } from 'lucide-react';
 import { Button } from '../common/Button';
 import { SyncHealthBadge } from './SyncHealthBadge';
@@ -34,6 +37,20 @@ import { SyncStatusState } from '../../services/drift';
 import { formatTime } from '../../services/playerUtils';
 import { SubtitleCue, parseSubtitles, findActiveCues } from '../../services/subtitles';
 import { VideoPlayerHandle } from './VideoPlayer';
+
+export function isDirectMediaStreamUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  if (lower.startsWith('/api/browse/stream-proxy')) return true;
+  const clean = lower.split('?')[0].split('#')[0];
+  return (
+    lower.includes('.m3u8') ||
+    clean.endsWith('.mp4') ||
+    clean.endsWith('.webm') ||
+    clean.endsWith('.m4v') ||
+    clean.endsWith('.ogg')
+  );
+}
 
 export interface OnlineVideoPlayerProps {
   streamUrl: string | null;
@@ -49,6 +66,9 @@ export interface OnlineVideoPlayerProps {
   onBufferingStart?: () => void;
   onBufferingEnd?: () => void;
   onEnded?: () => void;
+  onPlaybackError?: () => void;
+  onSwitchNextServer?: () => void;
+  nextServerLabel?: string | null;
   bufferingParticipants?: string[];
   onResync?: () => void;
   isResyncing?: boolean;
@@ -63,6 +83,8 @@ export interface OnlineVideoPlayerProps {
 
 const SPEED_OPTIONS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 const POS_STORAGE_PREFIX = 'animesync_online_pos_';
+export const IFRAME_AD_SHIELD_SANDBOX =
+  'allow-scripts allow-same-origin allow-forms allow-presentation';
 
 export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayerProps>(
   (
@@ -80,6 +102,9 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
       onBufferingStart,
       onBufferingEnd,
       onEnded,
+      onPlaybackError,
+      onSwitchNextServer,
+      nextServerLabel = null,
       bufferingParticipants = [],
       onResync,
       isResyncing = false,
@@ -109,10 +134,22 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [reloadNonce, setReloadNonce] = useState(0);
+    const [useStreamProxy, setUseStreamProxy] = useState(false);
+    const [adShieldEnabled, setAdShieldEnabled] = useState(true);
 
     const [subtitleCues, setSubtitleCues] = useState<SubtitleCue[]>([]);
     const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
     const [nativeTrackUrl, setNativeTrackUrl] = useState<string | null>(null);
+
+    const isEmbedMode = Boolean(streamUrl) && !isDirectMediaStreamUrl(streamUrl);
+    const effectiveStreamUrl =
+      streamUrl && !isEmbedMode && useStreamProxy && !streamUrl.startsWith('/api/browse/stream-proxy')
+        ? `/api/browse/stream-proxy?url=${encodeURIComponent(streamUrl)}`
+        : streamUrl;
+
+    useEffect(() => {
+      setUseStreamProxy(false);
+    }, [streamUrl]);
 
     const runAsRemote = useCallback((fn: () => void) => {
       isRemoteActionRef.current = true;
@@ -183,43 +220,83 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
       setCurrentTime(0);
       setDuration(0);
 
-      if (!streamUrl) {
+      if (!effectiveStreamUrl || isEmbedMode) {
         video.removeAttribute('src');
         video.load();
+        setIsLoading(false);
         return;
       }
 
       setIsLoading(true);
-      const isHls = streamUrl.toLowerCase().includes('.m3u8');
+      const lowerEff = effectiveStreamUrl.toLowerCase();
+      const lowerRaw = (streamUrl || '').toLowerCase();
+      const isHls =
+        lowerEff.includes('.m3u8') ||
+        lowerRaw.includes('.m3u8') ||
+        lowerEff.includes('format=hls') ||
+        lowerRaw.includes('format=hls');
 
       if (isHls) {
         if (Hls.isSupported()) {
-          const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+          const hls = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false,
+            fragLoadingMaxRetry: 6,
+            fragLoadingRetryDelay: 1000,
+            manifestLoadingMaxRetry: 4,
+            levelLoadingMaxRetry: 4,
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+          });
           hlsRef.current = hls;
-          hls.loadSource(streamUrl);
+          let networkRecoveryAttempts = 0;
+          hls.loadSource(effectiveStreamUrl);
           hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => setIsLoading(false));
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            networkRecoveryAttempts = 0;
+            setIsLoading(false);
+          });
+          hls.on(Hls.Events.FRAG_LOADED, () => {
+            networkRecoveryAttempts = 0;
+          });
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
-              setIsLoading(false);
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                if (networkRecoveryAttempts < 3) {
+                  networkRecoveryAttempts += 1;
+                  setTimeout(() => {
+                    if (hlsRef.current === hls) {
+                      hls.startLoad();
+                    }
+                  }, 1000 * networkRecoveryAttempts);
+                  return;
+                }
+                setIsLoading(false);
+                if (!useStreamProxy && streamUrl && !streamUrl.startsWith('/api/browse/stream-proxy')) {
+                  setUseStreamProxy(true);
+                  return;
+                }
                 setErrorMsg('Network or CORS error loading HLS stream. Ensure the URL is accessible.');
+                onPlaybackError?.();
               } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                setIsLoading(false);
                 hls.recoverMediaError();
               } else {
+                setIsLoading(false);
                 setErrorMsg('Fatal HLS playback error. This stream format may not be supported.');
                 hls.destroy();
+                onPlaybackError?.();
               }
             }
           });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-          video.src = streamUrl;
+          video.src = effectiveStreamUrl;
         } else {
           setIsLoading(false);
           setErrorMsg('HLS (.m3u8) playback is not supported in this browser.');
         }
       } else {
-        video.src = streamUrl;
+        video.src = effectiveStreamUrl;
       }
 
       return () => {
@@ -228,7 +305,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           hlsRef.current = null;
         }
       };
-    }, [streamUrl, reloadNonce]);
+    }, [effectiveStreamUrl, streamUrl, isEmbedMode, useStreamProxy, reloadNonce]);
 
     useEffect(() => {
       setSubtitleCues([]);
@@ -375,61 +452,80 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
         </div>
 
         <div className="relative flex-1 bg-black aspect-video flex items-center justify-center">
-          <video
-            ref={videoRef}
-            className="w-full h-full object-contain"
-            playsInline
-            crossOrigin="anonymous"
-            onClick={togglePlay}
-            onLoadedMetadata={handleLoadedMetadata}
-            onCanPlay={() => setIsLoading(false)}
-            onWaiting={() => {
-              setIsLoading(true);
-              if (!isRemoteActionRef.current) onBufferingStart?.();
-            }}
-            onPlaying={() => {
-              setIsLoading(false);
-              if (!isRemoteActionRef.current) onBufferingEnd?.();
-            }}
-            onPlay={() => {
-              setIsPlaying(true);
-              if (!isRemoteActionRef.current) onPlay?.();
-            }}
-            onPause={() => {
-              setIsPlaying(false);
-              if (!isRemoteActionRef.current) onPause?.();
-            }}
-            onTimeUpdate={() => {
-              const v = videoRef.current;
-              if (!v) return;
-              setCurrentTime(v.currentTime);
-              if (Number.isFinite(v.duration)) setDuration(v.duration);
-              onTimeUpdate?.(v.currentTime, v.duration || 0);
+          {isEmbedMode && streamUrl ? (
+            <iframe
+              key={`${streamUrl}_${reloadNonce}_${adShieldEnabled ? 'shield' : 'unshielded'}`}
+              src={streamUrl}
+              title={`${animeTitle}${episodeNumber !== undefined ? ` Episode ${episodeNumber}` : ''}`}
+              className="w-full h-full border-0"
+              sandbox={adShieldEnabled ? IFRAME_AD_SHIELD_SANDBOX : undefined}
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+              allowFullScreen
+              referrerPolicy="no-referrer-when-downgrade"
+              onError={() => onPlaybackError?.()}
+            />
+          ) : (
+            <video
+              ref={videoRef}
+              className="w-full h-full object-contain"
+              playsInline
+              crossOrigin="anonymous"
+              onClick={togglePlay}
+              onLoadedMetadata={handleLoadedMetadata}
+              onCanPlay={() => setIsLoading(false)}
+              onWaiting={() => {
+                setIsLoading(true);
+                if (!isRemoteActionRef.current) onBufferingStart?.();
+              }}
+              onPlaying={() => {
+                setIsLoading(false);
+                if (!isRemoteActionRef.current) onBufferingEnd?.();
+              }}
+              onPlay={() => {
+                setIsPlaying(true);
+                if (!isRemoteActionRef.current) onPlay?.();
+              }}
+              onPause={() => {
+                setIsPlaying(false);
+                if (!isRemoteActionRef.current) onPause?.();
+              }}
+              onTimeUpdate={() => {
+                const v = videoRef.current;
+                if (!v) return;
+                setCurrentTime(v.currentTime);
+                if (Number.isFinite(v.duration)) setDuration(v.duration);
+                onTimeUpdate?.(v.currentTime, v.duration || 0);
 
-              if (persistKey && Math.abs(v.currentTime - lastSavedPosRef.current) >= 3) {
-                lastSavedPosRef.current = v.currentTime;
-                try {
-                  localStorage.setItem(`${POS_STORAGE_PREFIX}${persistKey}`, String(Math.floor(v.currentTime)));
-                } catch {
-                  // ignore storage errors
+                if (persistKey && Math.abs(v.currentTime - lastSavedPosRef.current) >= 3) {
+                  lastSavedPosRef.current = v.currentTime;
+                  try {
+                    localStorage.setItem(`${POS_STORAGE_PREFIX}${persistKey}`, String(Math.floor(v.currentTime)));
+                  } catch {
+                    // ignore storage errors
+                  }
                 }
-              }
-            }}
-            onEnded={() => {
-              setIsPlaying(false);
-              onEnded?.();
-            }}
-            onError={() => {
-              setIsLoading(false);
-              setErrorMsg(
-                'Unable to play this media URL. Ensure it is a browser-compatible MP4, WebM, or HLS (.m3u8) source.'
-              );
-            }}
-          >
-            {nativeTrackUrl && subtitlesEnabled && (
-              <track kind="subtitles" src={nativeTrackUrl} default />
-            )}
-          </video>
+              }}
+              onEnded={() => {
+                setIsPlaying(false);
+                onEnded?.();
+              }}
+              onError={() => {
+                setIsLoading(false);
+                if (!useStreamProxy && streamUrl && !streamUrl.startsWith('/api/browse/stream-proxy')) {
+                  setUseStreamProxy(true);
+                  return;
+                }
+                setErrorMsg(
+                  'Unable to play this media URL. Ensure it is a browser-compatible MP4, WebM, or HLS (.m3u8) source.'
+                );
+                onPlaybackError?.();
+              }}
+            >
+              {nativeTrackUrl && subtitlesEnabled && (
+                <track kind="subtitles" src={nativeTrackUrl} default />
+              )}
+            </video>
+          )}
 
           {activeCues.length > 0 && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 max-w-[85%] text-center pointer-events-none z-20">
@@ -471,24 +567,130 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
             <div className="absolute inset-0 z-30 bg-void-950/90 flex flex-col items-center justify-center p-6 text-center">
               <AlertCircle className="w-10 h-10 text-rose-400 mb-2" />
               <p className="text-sm font-semibold text-white max-w-md">{errorMsg}</p>
-              <Button
-                variant="secondary"
-                size="sm"
-                className="mt-4"
-                leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
-                onClick={() => {
-                  setErrorMsg(null);
-                  setReloadNonce((n) => n + 1);
-                }}
-              >
-                Retry Media
-              </Button>
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
+                  onClick={() => {
+                    setErrorMsg(null);
+                    setReloadNonce((n) => n + 1);
+                  }}
+                >
+                  Retry Media
+                </Button>
+                {onSwitchNextServer && (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => {
+                      setErrorMsg(null);
+                      onSwitchNextServer();
+                    }}
+                  >
+                    {nextServerLabel ? `Switch to ${nextServerLabel}` : 'Try Next Server'}
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 
           {isFullscreen && fullscreenOverlay}
         </div>
 
+        {isEmbedMode && streamUrl ? (
+          <div className="bg-void-950/95 border-t border-void-800/80 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-ink-muted">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono text-[10px]">
+                EMBED PLAYER
+              </span>
+              <span className="text-[11px]">
+                {adShieldEnabled
+                  ? 'Ad & popup redirect shield active (popups & top-page redirects blocked).'
+                  : 'Ad shield off — provider popups/redirects allowed.'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setAdShieldEnabled((v) => !v)}
+                title={
+                  adShieldEnabled
+                    ? 'Ad & Popup Shield On (blocks iframe popups and redirects). Click to disable if player refuses to load.'
+                    : 'Ad & Popup Shield Off. Click to enable popup & redirect blocking.'
+                }
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-mono transition-colors ${
+                  adShieldEnabled
+                    ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
+                    : 'bg-amber-950/70 border-amber-700 text-amber-300'
+                }`}
+              >
+                {adShieldEnabled ? (
+                  <Shield className="w-3.5 h-3.5" />
+                ) : (
+                  <ShieldAlert className="w-3.5 h-3.5" />
+                )}
+                <span>{adShieldEnabled ? 'Ad Shield On' : 'Ad Shield Off'}</span>
+              </button>
+
+              {onSwitchNextServer && (
+                <button
+                  type="button"
+                  onClick={onSwitchNextServer}
+                  title="Current server not playing? Switch to next available server"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-950/80 border border-violet-700/80 text-violet-200 hover:bg-violet-900 transition-colors"
+                >
+                  <span>{nextServerLabel ? `Try ${nextServerLabel}` : 'Next Server'}</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setReloadNonce((n) => n + 1)}
+                title="Reload Player"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-void-900 border border-void-700 text-ink-muted hover:text-white transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Reload</span>
+              </button>
+
+              <a
+                href={streamUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-void-900 border border-void-700 text-ink-muted hover:text-white transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Pop Out</span>
+              </a>
+
+              {onToggleTheaterMode && (
+                <button
+                  type="button"
+                  onClick={onToggleTheaterMode}
+                  title="Toggle Theater Mode"
+                  className={`p-1.5 rounded-lg border transition-colors ${
+                    isTheaterMode
+                      ? 'bg-violet-950 border-violet-700 text-violet-300'
+                      : 'bg-void-900 border-void-700 text-ink-muted hover:text-white'
+                  }`}
+                >
+                  <Tv className="w-4 h-4" />
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                aria-label={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
+                className="p-1.5 rounded-lg bg-void-900 border border-void-700 text-ink-muted hover:text-white transition-colors"
+              >
+                {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="bg-void-950/95 border-t border-void-800/80 px-3 py-2 space-y-2">
           <input
             type="range"
@@ -584,6 +786,22 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
                 </button>
               )}
 
+              {streamUrl && !streamUrl.startsWith('/api/browse/stream-proxy') && (
+                <button
+                  type="button"
+                  onClick={() => setUseStreamProxy((p) => !p)}
+                  title={useStreamProxy ? 'Streaming via backend proxy' : 'Route stream through backend proxy (CORS bypass)'}
+                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-mono transition-colors ${
+                    useStreamProxy
+                      ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
+                      : 'bg-void-900 border-void-700 text-ink-muted hover:text-white'
+                  }`}
+                >
+                  <Shield className="w-3 h-3" />
+                  <span>{useStreamProxy ? 'Proxy On' : 'Proxy'}</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={toggleFullscreen}
@@ -595,6 +813,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
             </div>
           </div>
         </div>
+        )}
       </div>
     );
   }

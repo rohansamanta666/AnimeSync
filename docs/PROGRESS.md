@@ -1,11 +1,11 @@
 # AnimeSync — Project Progress
 
 ## 1. Project Status Overview
-- **Current Phase**: Phase 11 (Complete Anime Browsing, Media Providers, Downloads & Online Watch Together) — **COMPLETED (100%)**
+- **Current Phase**: Phase 12 (Integrated Anime Provider, Direct HLS Streaming, Ad Shield & Server Failover) — **COMPLETED (100%)**
 - **Next Task**: **Production Ready / Ready for Deployment & Watch Parties**
 - **Git Branch**: `feat/browse-anime`
-- **Latest Commit**: Phase 11 Browse & Watch Experience
-- **Overall Health**: 100% Healthy & Clean (0 failing tests, 85 backend tests passing, 105 frontend tests passing, 0 TypeScript errors, Vite production build successful)
+- **Latest Commit**: Phase 12 Integrated Anime Provider, Streaming Proxy, Ad Shield & Watch Together Polish
+- **Overall Health**: 100% Healthy & Clean (0 failing tests, 92 backend tests passing, 109 frontend tests passing, 0 TypeScript errors, Vite production build successful)
 - **Target OS**: macOS (Apple Silicon & Intel)
 - **Zero-Cost Compliance**: 100% verified (Local storage, SQLite, WebRTC P2P + Google STUN, Cloudflare Quick Tunnel / Tailscale WireGuard Mesh)
 
@@ -26,6 +26,7 @@
 | **Phase 9** | Testing, Security & Free Deployment | **COMPLETED** | 100% |
 | **Phase 10** | Voice Cross-Device, Presence Lifecycle & Room Management | **COMPLETED** | 100% |
 | **Phase 11** | Anime Browsing, Media Providers, Downloads & Online Sync | **COMPLETED** | 100% |
+| **Phase 12** | Integrated Anime Provider Server, Direct HLS Proxy, Ad Shield & Failover | **COMPLETED** | 100% |
 
 ---
 
@@ -354,6 +355,24 @@
   - Separate `/browse` and `/browse/:id` pages accessible from `Navbar` (`Browse Anime` button) without altering `LandingPage` or local-file `VideoPlayer`.
   - `OnlineVideoPlayer` supports MP4, WebM, HLS (`.m3u8` via `hls.js` + Safari native fallback), `.vtt`/`.srt` subtitles, resume position, and `VideoPlayerHandle` for Watch Together synchronization.
 
+### Phase 12: Integrated Anime Provider, Direct HLS Streaming, Ad Shield & Failover (100% Completed)
+- [x] **Task 12.1: Node.js Runtime & Backend Process Lifecycle (`anime-provider/node-server.ts`, `provider_process.py`, `main.py`, `start.sh`, `stop.sh`)**:
+  - Added Node.js HTTP bridge (`node-server.ts`) and `ncc` bundle build (`npm run build:node`) so `anime-provider` runs cleanly with either Bun or Node.js.
+  - Integrated `ProviderProcessManager` into FastAPI `lifespan` so `anime-provider` starts and stops alongside the backend automatically on port `5000`.
+  - Updated `anime-provider` host scraping (`fetch.ts`, `eps.ts`, `servers.ts`) to match updated upstream `zanixcloud.blog` (`ZCDN`) and `novuscloud.buzz` (`CDN`) player hosts and `zanix.video_id` episode metadata.
+- [x] **Task 12.2: Full Provider API Exposure & Unified Browse (`api/provider.py`, `anime_provider_service.py`, `api/browse.py`)**:
+  - Exposed all provider endpoints under `/api/provider/*`: `health`, `home`, `search`, `suggestion`, `animes/{query}`, `filter`, `anime/{id}`, `episodes/{id}`, `servers/{episodeId}`, `resolve`, `schedules`, `genres`, `top-search`, `random`, `characters`, and `news`.
+  - Connected `/api/browse/discover`, `/api/browse/search`, and `/api/browse/anime/{id}` to `anime-provider` with automatic AniList fallback.
+  - Added `source_type`, `stream_url`, and `subtitle_url` to `EpisodeResponse` (`schemas/room.py`) so REST room/queue responses preserve online episodes.
+- [x] **Task 12.3: Direct HLS Stream Extraction, Pooled Stream Proxy & ASS Subtitles (`browse.py`, `rooms.py`, `subtitles.ts`)**:
+  - Extracted direct `.m3u8` master playlists and `.ass`/`.srt`/`.vtt` caption tracks from `s-3`/`s-4` (`/stream/getSources`) without iframe ads.
+  - Built SSRF-guarded `/api/browse/stream-proxy` with M3U8 playlist URI rewriting, shared `httpx.AsyncClient` connection pooling, `asyncio.Semaphore(4)` throttling, and exponential backoff retries for `429`/`502` responses.
+  - Added `.ass`/`.ssa` subtitle parsing (`parseASS`) in `subtitles.ts` and allowed validated stream-proxy URLs in Watch Together `add_online_episode`.
+- [x] **Task 12.4: Ad & Popup Shield, `s-1`-First Server Priority & Auto-Failover (`OnlineVideoPlayer.tsx`, `AnimeDetailsPage.tsx`, `ProviderEpisodeModal.tsx`, `RoomPage.tsx`)**:
+  - Added `IFRAME_AD_SHIELD_SANDBOX` (`allow-scripts allow-same-origin allow-forms allow-presentation`) toggle (`Ad Shield On` by default) to block iframe ad popups and top-page redirects.
+  - Ordered provider servers starting with `s-1` → `s-2` → `s-3` → `s-4` with automatic failover (`onPlaybackError`) and one-click `Next Server` switching, plus `Direct HLS` extraction when selecting `s-3`/`s-4`.
+  - Polished Watch Together `RoomPage.tsx` status bar for online episodes (`Online Stream Ready`) and added in-room `ProviderEpisodeModal` (`Stream Anime`) for hosts.
+
 ---
 
 ## 4. In-Progress Features
@@ -391,18 +410,19 @@
 - `backend/tests/test_security_and_e2e.py` (5 tests, Phase 9) — **PASSED**
 - `backend/tests/test_kick_and_presence.py` (7 tests, Phase 10) — **PASSED**
 - `backend/tests/test_browse_and_downloads.py` (5 tests, Phase 11) — **PASSED**
+- `backend/tests/test_anime_provider.py` (7 tests, Phase 12) — **PASSED**
 - `frontend/tests/drift.test.ts` (20 unit tests) — **PASSED**
 - `frontend/tests/sync_health.test.ts` (10 unit tests) — **PASSED**
 - `frontend/tests/queue.test.ts` (11 unit tests) — **PASSED**
 - `frontend/tests/chat_voice.test.ts` (18 unit tests) — **PASSED**
 - `frontend/tests/room_polish.test.ts` (9 unit tests) — **PASSED**
-- `frontend/tests/subtitles.test.ts` (13 unit tests) — **PASSED**
+- `frontend/tests/subtitles.test.ts` (14 unit tests) — **PASSED**
 - `frontend/tests/media.test.ts` (6 unit tests) — **PASSED**
 - `frontend/tests/playback_sync_fixes.test.ts` (9 unit tests) — **PASSED**
 - `frontend/tests/voice_and_presence.test.ts` (6 unit tests, Phase 10) — **PASSED**
-- `frontend/tests/browse_and_online.test.ts` (3 unit tests, Phase 11) — **PASSED**
+- `frontend/tests/browse_and_online.test.ts` (6 unit tests, Phase 11–12) — **PASSED**
 - `npm run build` (TypeScript compilation & Vite bundle) — **PASSED**
-- Master test runner `./scripts/test.sh` — **PASSED** (All 85 backend tests + 105 frontend unit tests + Vite build)
+- Master test runner `./scripts/test.sh` — **PASSED** (All 92 backend tests + 109 frontend unit tests + Vite build)
 
 ---
 

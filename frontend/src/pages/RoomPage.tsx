@@ -23,6 +23,7 @@ import {
   Keyboard,
   HardDrive,
   UserX,
+  Compass,
 } from 'lucide-react';
 import { api, sessionStore } from '../services/api';
 import { Room, RoomAuth, ParticipantPresence, Episode } from '../types';
@@ -34,6 +35,7 @@ import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { JoinRoomModal } from '../components/room/JoinRoomModal';
 import { EpisodeUploadModal } from '../components/file/EpisodeUploadModal';
+import { ProviderEpisodeModal } from '../components/browse/ProviderEpisodeModal';
 import { EpisodeVerificationCard } from '../components/file/EpisodeVerificationCard';
 import { CountdownOverlay } from '../components/room/CountdownOverlay';
 import { PlaybackStartedBanner } from '../components/room/PlaybackStartedBanner';
@@ -63,6 +65,7 @@ export const RoomPage: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showProviderModal, setShowProviderModal] = useState(false);
   const [localVideoFile, setLocalVideoFile] = useState<File | null>(null);
   const videoPlayerRef = useRef<VideoPlayerHandle | null>(null);
 
@@ -903,14 +906,22 @@ export const RoomPage: React.FC = () => {
                 </p>
 
                 {auth?.is_host && (
-                  <div className="mt-5">
+                  <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                     <Button
                       variant="primary"
+                      size="sm"
+                      leftIcon={<Compass className="w-4 h-4" />}
+                      onClick={() => setShowProviderModal(true)}
+                    >
+                      Stream from Provider
+                    </Button>
+                    <Button
+                      variant="secondary"
                       size="sm"
                       leftIcon={<Upload className="w-4 h-4" />}
                       onClick={() => setShowUploadModal(true)}
                     >
-                      Upload Anime Episode
+                      Upload Local File
                     </Button>
                   </div>
                 )}
@@ -934,7 +945,11 @@ export const RoomPage: React.FC = () => {
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-mono text-ink-muted">Your Status:</span>
-                    <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
+                    {isOnlineEpisodeActive ? (
+                      <Badge variant="green">Online Stream Ready</Badge>
+                    ) : (
+                      <Badge status={currentParticipant?.status || 'WAITING_FOR_FILE'} />
+                    )}
                   </div>
 
                   {/* Phase 5 Task 5.6: Sync Health Diagnostics & Resync Trigger */}
@@ -965,42 +980,54 @@ export const RoomPage: React.FC = () => {
 
                 <div className="flex items-center gap-2">
                   {auth?.is_host && currentEpisode && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      leftIcon={<Plus className="w-4 h-4" />}
-                      onClick={() => setShowUploadModal(true)}
-                    >
-                      Upload Another
-                    </Button>
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Compass className="w-4 h-4 text-emerald-400" />}
+                        onClick={() => setShowProviderModal(true)}
+                      >
+                        Stream Anime
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<Plus className="w-4 h-4" />}
+                        onClick={() => setShowUploadModal(true)}
+                      >
+                        Upload Another
+                      </Button>
+                    </>
                   )}
 
-                  {/* Ready / Unready toggle */}
-                  {isReady ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={isPending}
-                      leftIcon={<X className="w-4 h-4 text-rose-400" />}
-                      onClick={markUnready}
-                    >
-                      {isPending ? 'Updating…' : 'Cancel Ready'}
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      disabled={currentParticipant?.status !== 'VERIFIED' || isPending}
-                      leftIcon={<Sparkles className="w-4 h-4" />}
-                      onClick={markReady}
-                      title={
-                        currentParticipant?.status !== 'VERIFIED'
-                          ? 'Verify your local file first'
-                          : 'Mark yourself as ready to watch'
-                      }
-                    >
-                      {isPending ? 'Updating…' : "I'm Ready"}
-                    </Button>
+                  {/* Ready / Unready toggle (local-file verification mode only) */}
+                  {!isOnlineEpisodeActive && (
+                    isReady ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={isPending}
+                        leftIcon={<X className="w-4 h-4 text-rose-400" />}
+                        onClick={markUnready}
+                      >
+                        {isPending ? 'Updating…' : 'Cancel Ready'}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={currentParticipant?.status !== 'VERIFIED' || isPending}
+                        leftIcon={<Sparkles className="w-4 h-4" />}
+                        onClick={markReady}
+                        title={
+                          currentParticipant?.status !== 'VERIFIED'
+                            ? 'Verify your local file first'
+                            : 'Mark yourself as ready to watch'
+                        }
+                      >
+                        {isPending ? 'Updating…' : "I'm Ready"}
+                      </Button>
+                    )
                   )}
                 </div>
               </div>
@@ -1320,6 +1347,25 @@ export const RoomPage: React.FC = () => {
                 ...prev,
                 current_episode_id: prev.current_episode_id || ep.id,
                 episodes: [ep, ...prev.episodes.filter((e) => e.id !== ep.id)],
+              };
+            });
+          }}
+        />
+      )}
+
+      {/* Provider Streaming Modal (Host Only) */}
+      {auth && (
+        <ProviderEpisodeModal
+          isOpen={showProviderModal}
+          onClose={() => setShowProviderModal(false)}
+          auth={auth}
+          onEpisodeAdded={(ep) => {
+            setInitialRoom((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                current_episode_id: ep.id,
+                episodes: [...prev.episodes.filter((e) => e.id !== ep.id), ep],
               };
             });
           }}

@@ -64,8 +64,21 @@ if [ "$REBUILD_FRONTEND" = true ]; then
     cd "$PROJECT_ROOT"
 fi
 
-# 4. Storage directory verification
-mkdir -p storage/videos storage/uploads_temp
+# 4. Build anime-provider Node bundle if needed
+if [ -d "anime-provider" ] && [ ! -f "anime-provider/dist-node/index.js" ]; then
+    if command -v npm >/dev/null 2>&1; then
+        echo "📡 Building anime-provider server bundle..."
+        cd anime-provider
+        if [ ! -d "node_modules" ]; then
+            npm install
+        fi
+        npm run build:node
+        cd "$PROJECT_ROOT"
+    fi
+fi
+
+# 5. Storage directory verification
+mkdir -p storage/videos storage/uploads_temp storage/downloads
 
 # 5. Prevent Mac sleep during watch party session (caffeinate)
 CAFFEINATE_PID=""

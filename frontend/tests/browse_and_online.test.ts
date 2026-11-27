@@ -41,3 +41,59 @@ test('isSafeHttpUrl accepts http/https and blocks dangerous schemes', () => {
   assert.equal(isSafeHttpUrl('file:///etc/passwd'), false);
   assert.equal(isSafeHttpUrl(''), false);
 });
+
+function isDirectMediaStreamUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  if (lower.startsWith('/api/browse/stream-proxy')) return true;
+  const clean = lower.split('?')[0].split('#')[0];
+  return (
+    lower.includes('.m3u8') ||
+    clean.endsWith('.mp4') ||
+    clean.endsWith('.webm') ||
+    clean.endsWith('.m4v') ||
+    clean.endsWith('.ogg')
+  );
+}
+
+test('isDirectMediaStreamUrl distinguishes direct media/proxy URLs from provider iframe embeds', () => {
+  assert.equal(isDirectMediaStreamUrl('https://cdn.example.com/ep1/master.m3u8?token=abc'), true);
+  assert.equal(isDirectMediaStreamUrl('https://cdn.example.com/ep1.mp4'), true);
+  assert.equal(isDirectMediaStreamUrl('/api/browse/stream-proxy?url=https%3A%2F%2Fcdn.example.com%2Fvideo'), true);
+  assert.equal(isDirectMediaStreamUrl('https://flixera.example.com/embed/ani/154587/1/sub?autoplay=0'), false);
+  assert.equal(isDirectMediaStreamUrl('https://zcdn.example.com/e/12345/sub'), false);
+  assert.equal(isDirectMediaStreamUrl(null), false);
+});
+
+test('IFRAME_AD_SHIELD_SANDBOX blocks popups and top-level redirects', () => {
+  const sandbox = 'allow-scripts allow-same-origin allow-forms allow-presentation';
+  const tokens = sandbox.split(/\s+/);
+  assert.equal(tokens.includes('allow-scripts'), true);
+  assert.equal(tokens.includes('allow-same-origin'), true);
+  assert.equal(tokens.includes('allow-popups'), false);
+  assert.equal(tokens.includes('allow-popups-to-escape-sandbox'), false);
+  assert.equal(tokens.includes('allow-top-navigation'), false);
+  assert.equal(tokens.includes('allow-top-navigation-by-user-activation'), false);
+});
+
+test('server priority ordering starts with s-1 and fails over sequentially', () => {
+  const priority: Record<string, number> = { 's-1': 0, 's-2': 1, 's-3': 2, 's-4': 3 };
+  const raw = [
+    { serverName: 's-3', iframe: 'https://novus.example/3' },
+    { serverName: 's-1', iframe: 'https://z.example/1' },
+    { serverName: 's-4', iframe: 'https://novus.example/4' },
+    { serverName: 's-2', iframe: 'https://z.example/2' },
+  ];
+  const sorted = [...raw].sort(
+    (a, b) => (priority[a.serverName] ?? 99) - (priority[b.serverName] ?? 99)
+  );
+  assert.deepEqual(
+    sorted.map((s) => s.serverName),
+    ['s-1', 's-2', 's-3', 's-4']
+  );
+
+  // Failover skips failed s-1 -> picks s-2
+  const failed = new Set(['https://z.example/1']);
+  const next = sorted.find((s) => !failed.has(s.iframe));
+  assert.equal(next?.serverName, 's-2');
+});

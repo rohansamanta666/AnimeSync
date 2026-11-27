@@ -10,12 +10,18 @@ from backend.app.config import settings
 from backend.app.database import init_db
 from backend.app.api import api_router
 from backend.app.sockets import sio
+from backend.app.services.provider_process import provider_process_manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize SQLite database schema
     await init_db()
-    yield
+    # Start local anime-provider server alongside backend if enabled
+    await provider_process_manager.ensure_started()
+    try:
+        yield
+    finally:
+        provider_process_manager.stop()
 
 fastapi_app = FastAPI(
     title="AnimeSync API",

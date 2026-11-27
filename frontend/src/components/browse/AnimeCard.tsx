@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Film, Star } from 'lucide-react';
+import { Film, Star, Captions, Mic } from 'lucide-react';
 import { BrowseAnimeItem } from '../../types';
 
 export interface AnimeCardProps {
@@ -9,6 +9,7 @@ export interface AnimeCardProps {
 
 export const AnimeCard: React.FC<AnimeCardProps> = ({ anime }) => {
   const isOpenCatalog = anime.provider === 'open_catalog';
+  const isProvider = anime.provider === 'anime_provider' || anime.source === 'anime_provider';
 
   return (
     <Link
@@ -36,16 +37,38 @@ export const AnimeCard: React.FC<AnimeCardProps> = ({ anime }) => {
               {(anime.rating / 10).toFixed(1)}
             </span>
           )}
+          {anime.type && (
+            <span className="px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-mono text-violet-300">
+              {anime.type}
+            </span>
+          )}
         </div>
 
         <span className="absolute top-2 right-2 px-1.5 py-0.5 rounded bg-black/80 text-[10px] font-mono text-white">
-          {anime.episodes_count} EP
+          {anime.episodes_count || '?'} EP
         </span>
 
         {isOpenCatalog && (
           <span className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded bg-emerald-950/90 border border-emerald-700/60 text-[10px] font-mono text-emerald-300">
             Open License
           </span>
+        )}
+
+        {isProvider && (anime.sub_count != null || anime.dub_count != null) && (
+          <div className="absolute bottom-2 left-2 flex items-center gap-1">
+            {anime.sub_count != null && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-emerald-950/90 border border-emerald-700/60 text-[10px] font-mono text-emerald-300">
+                <Captions className="w-2.5 h-2.5" />
+                {anime.sub_count}
+              </span>
+            )}
+            {anime.dub_count != null && (
+              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-sky-950/90 border border-sky-700/60 text-[10px] font-mono text-sky-300">
+                <Mic className="w-2.5 h-2.5" />
+                {anime.dub_count}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -55,7 +78,7 @@ export const AnimeCard: React.FC<AnimeCardProps> = ({ anime }) => {
             {anime.title}
           </h3>
           <p className="text-[11px] text-ink-dim mt-1 truncate">
-            {[anime.release_year, anime.status].filter(Boolean).join(' • ')}
+            {[anime.release_year, anime.duration, anime.status].filter(Boolean).join(' • ')}
           </p>
         </div>
 

@@ -545,6 +545,7 @@ async def add_online_episode(
     db: AsyncSession = Depends(get_db),
 ):
     """Adds an authorized online stream episode (.mp4/.webm/.m3u8) to a room (host only)."""
+    from urllib.parse import parse_qs, urlparse
     from backend.app.models.episode import Episode, UploadStatus
     from backend.app.services.url_security import validate_external_media_url
     from backend.app.sockets.playback_manager import playback_manager
@@ -556,15 +557,36 @@ async def add_online_episode(
 
     await _authenticate_participant(db, room.id, participant_id, session_token, require_host=True)
 
-    url_check = validate_external_media_url(payload.stream_url, resolve_dns=False)
-    if not url_check["valid"]:
-        raise HTTPException(status_code=400, detail=url_check["error"])
+    def _validate_stream_or_proxy(raw_url: str, label: str = "stream URL") -> dict:
+        trimmed = (raw_url or "").strip()
+        if trimmed.startswith("/api/browse/stream-proxy"):
+            parsed = urlparse(trimmed)
+            qs = parse_qs(parsed.query)
+            target = (qs.get("url") or [""])[0]
+            ref = (qs.get("referer") or [""])[0]
+            fmt_hint = ((qs.get("format") or [""])[0] or "").lower()
+            target_check = validate_external_media_url(target, resolve_dns=False)
+            if not target_check["valid"]:
+                raise HTTPException(status_code=400, detail=f"Invalid {label}: {target_check['error']}")
+            if ref:
+                ref_check = validate_external_media_url(ref, resolve_dns=False)
+                if not ref_check["valid"]:
+                    raise HTTPException(status_code=400, detail=f"Invalid referer in {label}: {ref_check['error']}")
+            return {
+                "valid": True,
+                "url": trimmed,
+                "format": fmt_hint if fmt_hint in ("hls", "mp4", "webm") else target_check["format"],
+            }
+        check = validate_external_media_url(trimmed, resolve_dns=False)
+        if not check["valid"]:
+            raise HTTPException(status_code=400, detail=check["error"])
+        return check
+
+    url_check = _validate_stream_or_proxy(payload.stream_url, "stream URL")
 
     clean_sub_url = None
     if payload.subtitle_url and payload.subtitle_url.strip():
-        sub_check = validate_external_media_url(payload.subtitle_url, resolve_dns=False)
-        if not sub_check["valid"]:
-            raise HTTPException(status_code=400, detail=f"Invalid subtitle URL: {sub_check['error']}")
+        sub_check = _validate_stream_or_proxy(payload.subtitle_url, "subtitle URL")
         clean_sub_url = sub_check["url"]
 
     existing = await QueueManager.get_queue(db, room.id)

@@ -12,6 +12,14 @@ else
     echo "No AnimeSync server running on port 8000."
 fi
 
+# Kill running anime-provider instances on port 5000
+PROVIDER_PID=$(lsof -ti :5000 || true)
+if [ -n "$PROVIDER_PID" ]; then
+    echo "Stopping anime-provider server (PID $PROVIDER_PID)..."
+    kill -9 $PROVIDER_PID 2>/dev/null || true
+    echo "anime-provider server stopped."
+fi
+
 # Kill any lingering cloudflared tunnel processes if desired
 CF_PID=$(pgrep -f "cloudflared tunnel" 2>/dev/null || true)
 if [ -n "$CF_PID" ]; then
