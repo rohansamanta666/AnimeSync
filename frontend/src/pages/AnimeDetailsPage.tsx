@@ -306,23 +306,33 @@ export const AnimeDetailsPage: React.FC = () => {
       let syncSubtitleUrl = subtitleUrl;
 
       // Watch Together requires a Direct HLS/MP4 stream for Play/Pause/Seek sync;
-      // if currently playing an iframe embed (e.g. s-1), resolve a syncable Direct HLS server automatically.
+      // if currently playing an iframe embed (e.g. s-1/s-2), resolve a syncable Direct HLS server automatically.
       if (!isDirectMediaStreamUrl(syncStreamUrl) && selectedEp.episode_id) {
-        try {
-          const fx = audioType === 'dub' ? selectedEp.fx_dub : selectedEp.fx_sub;
-          const res = await api.getProviderServers(
-            selectedEp.episode_id,
-            audioType,
-            { ani: selectedEp.ani_id, mal: selectedEp.mal_id, fx },
-            true
-          );
-          if (res.direct?.stream_url) {
-            syncStreamUrl = res.direct.stream_url;
-            syncSubtitleUrl = res.direct.subtitle_url || syncSubtitleUrl;
+        const fx = audioType === 'dub' ? selectedEp.fx_dub : selectedEp.fx_sub;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await api.getProviderServers(
+              selectedEp.episode_id,
+              audioType,
+              { ani: selectedEp.ani_id, mal: selectedEp.mal_id, fx },
+              true
+            );
+            if (res.direct?.stream_url) {
+              syncStreamUrl = res.direct.stream_url;
+              syncSubtitleUrl = res.direct.subtitle_url || syncSubtitleUrl;
+              break;
+            }
+          } catch {
+            // retry once
           }
-        } catch {
-          // Keep current streamUrl if direct resolution fails
         }
+      }
+
+      if (!isDirectMediaStreamUrl(syncStreamUrl)) {
+        setServerError(
+          'Watch Together playback sync only works on Direct HLS servers (s-3/s-4). This episode does not currently expose a Direct HLS stream.'
+        );
+        return;
       }
 
       const roomName = `${anime.title.slice(0, 38)} — Ep ${selectedEp.episode_number}`;

@@ -860,6 +860,7 @@ export const RoomPage: React.FC = () => {
                     }
                   }}
                   fullscreenOverlay={fullscreenCommunicationContent}
+                  unreadCount={unreadMessages}
                 />
               ) : (
                 <VideoPlayer

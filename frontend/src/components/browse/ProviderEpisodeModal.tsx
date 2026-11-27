@@ -1,5 +1,16 @@
 import React, { useState } from 'react';
-import { X, Search, Loader2, Play, Server, AlertCircle, Captions, Mic } from 'lucide-react';
+import {
+  X,
+  Search,
+  Loader2,
+  Play,
+  Server,
+  AlertCircle,
+  Captions,
+  Mic,
+  AlertTriangle,
+  CheckCircle2,
+} from 'lucide-react';
 import { api } from '../../services/api';
 import {
   BrowseAnimeItem,
@@ -9,6 +20,7 @@ import {
   RoomAuth,
 } from '../../types';
 import { Button } from '../common/Button';
+import { isDirectMediaStreamUrl } from '../video/OnlineVideoPlayer';
 
 export interface ProviderEpisodeModalProps {
   isOpen: boolean;
@@ -35,6 +47,13 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
   const [selectedServer, setSelectedServer] = useState<ProviderServerEntry | null>(null);
   const [resolvedStreamUrl, setResolvedStreamUrl] = useState<string | null>(null);
   const [resolvedSubtitleUrl, setResolvedSubtitleUrl] = useState<string | null>(null);
+  const [directInfo, setDirectInfo] = useState<{
+    serverName?: string | null;
+    iframeUrl?: string | null;
+    streamUrl: string;
+    subtitleUrl?: string | null;
+  } | null>(null);
+  const [allowUnsyncedEmbed, setAllowUnsyncedEmbed] = useState(false);
   const [isLoadingServers, setIsLoadingServers] = useState(false);
   const [setActive, setSetActive] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
@@ -67,6 +86,8 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
     setErrorMsg(null);
     setResolvedStreamUrl(null);
     setResolvedSubtitleUrl(null);
+    setDirectInfo(null);
+    setAllowUnsyncedEmbed(false);
     try {
       const fx = track === 'dub' ? ep.fx_dub : ep.fx_sub;
       const res = await api.getProviderServers(
@@ -84,26 +105,31 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
 
       // Watch Together rooms require a Direct HLS/MP4 stream for Play/Pause/Seek sync
       if (res.direct?.stream_url) {
+        const directPayload = {
+          serverName: res.direct.serverName,
+          iframeUrl: res.direct.iframe_url,
+          streamUrl: res.direct.stream_url,
+          subtitleUrl: res.direct.subtitle_url || null,
+        };
+        setDirectInfo(directPayload);
         const match =
           list.find(
             (s) =>
               s.serverName === res.direct?.serverName ||
               s.iframe === res.direct?.iframe_url
           ) ||
+          list.find((s) => /^s-[34]$/i.test(s.serverName || '')) ||
           list[0] ||
           null;
         setSelectedServer(match);
         setResolvedStreamUrl(res.direct.stream_url);
         setResolvedSubtitleUrl(res.direct.subtitle_url || null);
       } else {
-        const first = list[0] || null;
-        setSelectedServer(first);
-        setResolvedStreamUrl(first?.iframe || null);
-        if (first) {
-          setErrorMsg(
-            'No Direct HLS stream found for this episode; embed fallback cannot auto-sync play/pause.'
-          );
-        } else {
+        const preferred =
+          list.find((s) => /^s-[34]$/i.test(s.serverName || '')) || list[0] || null;
+        setSelectedServer(preferred);
+        setResolvedStreamUrl(preferred?.iframe || null);
+        if (!preferred) {
           setErrorMsg(`No ${track.toUpperCase()} servers available for this episode.`);
         }
       }
@@ -311,19 +337,21 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
                       Episode {selectedEp.episode_number} Servers
                       {resolvedStreamUrl && (
                         <span
-                          className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${
-                            resolvedStreamUrl.startsWith('/api/browse/stream-proxy') ||
-                            resolvedStreamUrl.toLowerCase().includes('.m3u8') ||
-                            resolvedStreamUrl.toLowerCase().includes('.mp4')
+                          className={`ml-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                            isDirectMediaStreamUrl(resolvedStreamUrl)
                               ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300'
                               : 'bg-amber-950/80 border-amber-700 text-amber-300'
                           }`}
                         >
-                          {resolvedStreamUrl.startsWith('/api/browse/stream-proxy') ||
-                          resolvedStreamUrl.toLowerCase().includes('.m3u8') ||
-                          resolvedStreamUrl.toLowerCase().includes('.mp4')
-                            ? 'Synced HLS'
-                            : 'Embed Only (No Sync)'}
+                          {isDirectMediaStreamUrl(resolvedStreamUrl) ? (
+                            <>
+                              <CheckCircle2 className="w-3 h-3" /> Synced HLS
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-3 h-3" /> Embed Only (No Sync)
+                            </>
+                          )}
                         </span>
                       )}
                     </span>
@@ -367,12 +395,16 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
                     <div className="flex flex-wrap gap-2">
                       {servers.map((srv, i) => {
                         const active = selectedServer?.iframe === srv.iframe;
+                        const isDirectServer =
+                          Boolean(directInfo?.iframeUrl && srv.iframe === directInfo.iframeUrl) ||
+                          /^s-[34]$/i.test(srv.serverName || '');
                         return (
                           <button
                             key={`${srv.serverId || i}`}
                             type="button"
                             onClick={async () => {
                               setSelectedServer(srv);
+                              setAllowUnsyncedEmbed(false);
                               setIsLoadingServers(true);
                               try {
                                 const r = await api.resolveProviderStream(srv.iframe);
@@ -390,16 +422,66 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
                                 setIsLoadingServers(false);
                               }
                             }}
-                            className={`px-3 py-1 rounded-lg border text-xs font-mono ${
+                            className={`px-3 py-1 rounded-lg border text-xs font-mono inline-flex items-center gap-1.5 ${
                               active
-                                ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
-                                : 'bg-void-900 border-void-700 text-ink-muted hover:text-white'
+                                ? isDirectMediaStreamUrl(resolvedStreamUrl)
+                                  ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
+                                  : 'bg-amber-950/80 border-amber-500 text-amber-200'
+                                : isDirectServer
+                                ? 'bg-void-900 border-emerald-800/70 text-emerald-300/90 hover:text-white'
+                                : 'bg-void-900 border-void-700 text-ink-dim hover:text-ink-muted'
                             }`}
                           >
-                            {srv.serverName || `Server ${i + 1}`}
+                            <span>{srv.serverName || `Server ${i + 1}`}</span>
+                            <span className="text-[10px] opacity-80">
+                              {isDirectServer ? '• Sync' : '• No Sync'}
+                            </span>
                           </button>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {resolvedStreamUrl && !isDirectMediaStreamUrl(resolvedStreamUrl) && !isLoadingServers && (
+                    <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-700/60 space-y-2 text-xs text-amber-200">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-1 flex-1">
+                          <p className="font-medium text-amber-100">
+                            {selectedServer?.serverName || 'This server'} uses a third-party iframe embed, so Watch Together cannot sync Play, Pause, or Seek across participants.
+                          </p>
+                          {directInfo && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const match =
+                                  servers.find(
+                                    (s) =>
+                                      s.iframe === directInfo.iframeUrl ||
+                                      s.serverName === directInfo.serverName
+                                  ) || servers.find((s) => /^s-[34]$/i.test(s.serverName || ''));
+                                if (match) setSelectedServer(match);
+                                setResolvedStreamUrl(directInfo.streamUrl);
+                                setResolvedSubtitleUrl(directInfo.subtitleUrl || null);
+                                setAllowUnsyncedEmbed(false);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-[11px] transition-colors"
+                            >
+                              Switch to Synced HLS ({directInfo.serverName || 's-3'})
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <label className="flex items-center gap-2 text-[11px] text-amber-200/90 cursor-pointer pt-1 border-t border-amber-800/40">
+                        <input
+                          type="checkbox"
+                          checked={allowUnsyncedEmbed}
+                          onChange={(e) => setAllowUnsyncedEmbed(e.target.checked)}
+                          className="rounded border-amber-700 bg-void-900 accent-amber-500"
+                        />
+                        <span>Queue without Watch Together sync (everyone controls video manually)</span>
+                      </label>
                     </div>
                   )}
 
@@ -426,7 +508,13 @@ export const ProviderEpisodeModal: React.FC<ProviderEpisodeModalProps> = ({
             type="button"
             variant="primary"
             size="sm"
-            disabled={!selectedServer || isAdding}
+            disabled={
+              !selectedServer ||
+              isAdding ||
+              (Boolean(resolvedStreamUrl) &&
+                !isDirectMediaStreamUrl(resolvedStreamUrl) &&
+                !allowUnsyncedEmbed)
+            }
             isLoading={isAdding}
             onClick={handleQueueEpisode}
           >
