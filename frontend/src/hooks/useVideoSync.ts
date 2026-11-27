@@ -128,15 +128,29 @@ export function useVideoSync({
     if (isApplyingRemoteRef.current) return;
     if (!socket || !isEnabled || !roomCode) return;
 
+    const player = playerRef.current;
+    const currentTime = player ? player.getCurrentTime() : 0;
+    const snapshot = authoritativeSnapshotRef.current;
+
+    // Guard against decoder/HLS buffer reset emitting PLAY at 0:00 and rewinding the whole room
+    if (currentTime < 0.5 && snapshot && snapshot.currentTime > 3) {
+      if (player) {
+        const target = calculateResyncTarget(snapshot, Date.now() / 1000);
+        isApplyingRemoteRef.current = true;
+        player.seek(target.targetTime);
+        setTimeout(() => {
+          isApplyingRemoteRef.current = false;
+        }, 150);
+      }
+      return;
+    }
+
     lastActionTimeRef.current = Date.now();
     if (isNudgingRef.current && playerRef.current) {
       playerRef.current.setPlaybackRate(userPlaybackRateRef.current);
       isNudgingRef.current = false;
       setIsNudging(false);
     }
-
-    const player = playerRef.current;
-    const currentTime = player ? player.getCurrentTime() : 0;
 
     socket.emit('playback_action', {
       action: 'PLAY',
@@ -149,15 +163,21 @@ export function useVideoSync({
     if (isApplyingRemoteRef.current) return;
     if (!socket || !isEnabled || !roomCode) return;
 
+    const player = playerRef.current;
+    const currentTime = player ? player.getCurrentTime() : 0;
+    const snapshot = authoritativeSnapshotRef.current;
+
+    // Guard against spurious pause during an HLS reset back to 0:00
+    if (currentTime < 0.5 && snapshot && snapshot.currentTime > 3) {
+      return;
+    }
+
     lastActionTimeRef.current = Date.now();
     if (isNudgingRef.current && playerRef.current) {
       playerRef.current.setPlaybackRate(userPlaybackRateRef.current);
       isNudgingRef.current = false;
       setIsNudging(false);
     }
-
-    const player = playerRef.current;
-    const currentTime = player ? player.getCurrentTime() : 0;
 
     socket.emit('playback_action', {
       action: 'PAUSE',
@@ -171,7 +191,16 @@ export function useVideoSync({
       if (isApplyingRemoteRef.current) return;
       if (!socket || !isEnabled || !roomCode) return;
 
+      const safeTime = Math.max(0, time);
       lastActionTimeRef.current = Date.now();
+      if (authoritativeSnapshotRef.current) {
+        authoritativeSnapshotRef.current = {
+          ...authoritativeSnapshotRef.current,
+          currentTime: safeTime,
+          updatedAt: Date.now() / 1000,
+          localReceivedAt: Date.now(),
+        };
+      }
       if (isNudgingRef.current && playerRef.current) {
         playerRef.current.setPlaybackRate(userPlaybackRateRef.current);
         isNudgingRef.current = false;
@@ -180,7 +209,7 @@ export function useVideoSync({
 
       socket.emit('playback_action', {
         action: 'SEEK',
-        timestamp: Math.max(0, time),
+        timestamp: safeTime,
         room_code: roomCode.toUpperCase(),
       });
     },

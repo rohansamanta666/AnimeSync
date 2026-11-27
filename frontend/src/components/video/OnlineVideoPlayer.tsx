@@ -138,6 +138,9 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
     const hlsRef = useRef<Hls | null>(null);
     const isRemoteActionRef = useRef<boolean>(false);
     const lastSavedPosRef = useRef<number>(0);
+    const lastKnownTimeRef = useRef<number>(0);
+    const isRecoveringRef = useRef<boolean>(false);
+    const waitingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const indicatorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -171,6 +174,8 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
 
     useEffect(() => {
       setUseStreamProxy(false);
+      lastKnownTimeRef.current = 0;
+      isRecoveringRef.current = false;
     }, [streamUrl]);
 
     const runAsRemote = useCallback((fn: () => void) => {
@@ -180,7 +185,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
       } finally {
         setTimeout(() => {
           isRemoteActionRef.current = false;
-        }, 60);
+        }, 150);
       }
     }, []);
 
@@ -200,7 +205,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           } finally {
             setTimeout(() => {
               isRemoteActionRef.current = false;
-            }, 60);
+            }, 150);
           }
           return started;
         },
@@ -208,7 +213,10 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
         seek: (seconds: number) => {
           runAsRemote(() => {
             if (videoRef.current && Number.isFinite(seconds)) {
-              videoRef.current.currentTime = Math.max(0, seconds);
+              const target = Math.max(0, seconds);
+              lastKnownTimeRef.current = target;
+              videoRef.current.currentTime = target;
+              setCurrentTime(target);
             }
           });
         },
@@ -239,8 +247,11 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
 
       setErrorMsg(null);
       setIsPlaying(false);
-      setCurrentTime(0);
-      setDuration(0);
+      const resumePosition = lastKnownTimeRef.current > 1 ? lastKnownTimeRef.current : 0;
+      if (resumePosition === 0) {
+        setCurrentTime(0);
+        setDuration(0);
+      }
 
       if (!effectiveStreamUrl || isEmbedMode) {
         video.removeAttribute('src');
@@ -263,6 +274,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           const hls = new Hls({
             enableWorker: true,
             lowLatencyMode: false,
+            startPosition: resumePosition > 0 ? resumePosition : -1,
             fragLoadingMaxRetry: 6,
             fragLoadingRetryDelay: 1000,
             manifestLoadingMaxRetry: 4,
@@ -277,24 +289,38 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             networkRecoveryAttempts = 0;
             setIsLoading(false);
+            const targetPos = lastKnownTimeRef.current;
+            if (targetPos > 1.5 && Math.abs(video.currentTime - targetPos) > 1.5) {
+              runAsRemote(() => {
+                video.currentTime = targetPos;
+                setCurrentTime(targetPos);
+              });
+            }
           });
           hls.on(Hls.Events.FRAG_LOADED, () => {
             networkRecoveryAttempts = 0;
+            isRecoveringRef.current = false;
           });
           hls.on(Hls.Events.ERROR, (_event, data) => {
             if (data.fatal) {
+              const savedPos = video.currentTime > 1 ? video.currentTime : lastKnownTimeRef.current;
+              if (savedPos > 1) {
+                lastKnownTimeRef.current = savedPos;
+              }
               if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                 if (networkRecoveryAttempts < 3) {
                   networkRecoveryAttempts += 1;
+                  isRecoveringRef.current = savedPos > 1;
                   setTimeout(() => {
                     if (hlsRef.current === hls) {
-                      hls.startLoad();
+                      hls.startLoad(savedPos > 1 ? savedPos : -1);
                     }
                   }, 1000 * networkRecoveryAttempts);
                   return;
                 }
                 setIsLoading(false);
                 if (!useStreamProxy && streamUrl && !streamUrl.startsWith('/api/browse/stream-proxy')) {
+                  isRecoveringRef.current = savedPos > 1;
                   setUseStreamProxy(true);
                   return;
                 }
@@ -302,6 +328,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
                 onPlaybackError?.();
               } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 setIsLoading(false);
+                isRecoveringRef.current = savedPos > 1;
                 hls.recoverMediaError();
               } else {
                 setIsLoading(false);
@@ -398,7 +425,15 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
     useEffect(() => {
       return () => {
         if (indicatorTimerRef.current) clearTimeout(indicatorTimerRef.current);
+        if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
       };
+    }, []);
+
+    const clearWaitingTimer = useCallback(() => {
+      if (waitingTimerRef.current) {
+        clearTimeout(waitingTimerRef.current);
+        waitingTimerRef.current = null;
+      }
     }, []);
 
     const flashIndicator = useCallback((type: 'play' | 'pause') => {
@@ -413,12 +448,19 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
       setIsLoading(false);
       setDuration(Number.isFinite(video.duration) ? video.duration : 0);
 
-      if (persistKey) {
+      const resumeTarget = lastKnownTimeRef.current;
+      if (resumeTarget > 1.5 && video.currentTime < 1) {
+        runAsRemote(() => {
+          video.currentTime = resumeTarget;
+          setCurrentTime(resumeTarget);
+        });
+      } else if (persistKey) {
         try {
           const saved = localStorage.getItem(`${POS_STORAGE_PREFIX}${persistKey}`);
           if (saved) {
             const parsed = parseFloat(saved);
             if (Number.isFinite(parsed) && parsed > 2 && (!video.duration || parsed < video.duration - 5)) {
+              lastKnownTimeRef.current = parsed;
               runAsRemote(() => {
                 video.currentTime = parsed;
               });
@@ -453,6 +495,7 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
         if (!video || !Number.isFinite(nextTime)) return;
         const maxDuration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : duration;
         const clamped = Math.max(0, maxDuration > 0 ? Math.min(nextTime, maxDuration) : nextTime);
+        lastKnownTimeRef.current = clamped;
         video.currentTime = clamped;
         setCurrentTime(clamped);
         if (!isRemoteActionRef.current) onSeek?.(clamped);
@@ -645,9 +688,13 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           ref={containerRef}
           tabIndex={0}
           onKeyDown={handleKeyDown}
-          className={`relative aspect-video bg-black rounded-2xl overflow-hidden border border-void-700/60 shadow-2xl select-none outline-none flex flex-col ${className}`}
+          className={
+            isFullscreen
+              ? `relative w-full h-full bg-black select-none outline-none flex flex-col ${className}`
+              : `relative bg-black rounded-2xl overflow-hidden border border-void-700/60 shadow-2xl select-none outline-none flex flex-col ${className}`
+          }
         >
-          <div className="flex items-center justify-between px-3 py-2 bg-void-950/90 border-b border-void-800/80 text-xs shrink-0">
+          <div className="flex items-center justify-between px-3 py-2 bg-void-950/95 border-b border-void-800/80 text-xs shrink-0">
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-semibold text-white truncate">{animeTitle}</span>
               {episodeNumber !== undefined && (
@@ -688,7 +735,13 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
             </div>
           </div>
 
-          <div className="relative flex-1 bg-black min-h-0 flex items-center justify-center">
+          <div
+            className={
+              isFullscreen
+                ? 'relative flex-1 min-h-0 bg-black flex items-center justify-center'
+                : 'relative w-full aspect-video bg-black flex items-center justify-center'
+            }
+          >
             <iframe
               key={`${streamUrl}_${reloadNonce}_${adShieldEnabled ? 'shield' : 'unshielded'}`}
               src={streamUrl}
@@ -734,19 +787,12 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
             )}
           </div>
 
-          <div className="bg-void-950/95 border-t border-void-800/80 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
-            <div className="flex items-center gap-2 text-ink-muted">
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono text-[10px]">
-                EMBED PLAYER
-              </span>
-              <span className="text-[11px] hidden sm:inline">
-                {adShieldEnabled
-                  ? 'Ad & popup redirect shield active (popups & top-page redirects blocked).'
-                  : 'Ad shield off — provider popups/redirects allowed.'}
-              </span>
-            </div>
+          <div className="bg-void-950/95 border-t border-void-800/80 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/70 border border-emerald-800/60 text-emerald-300 font-mono text-[10px]">
+              EMBED
+            </span>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setAdShieldEnabled((v) => !v)}
@@ -857,27 +903,73 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
           onClick={togglePlay}
           onDoubleClick={toggleFullscreen}
           onLoadedMetadata={handleLoadedMetadata}
-          onCanPlay={() => setIsLoading(false)}
+          onCanPlay={() => {
+            clearWaitingTimer();
+            setIsLoading(false);
+            const v = videoRef.current;
+            if (v && isRecoveringRef.current) {
+              const target = lastKnownTimeRef.current;
+              isRecoveringRef.current = false;
+              if (target > 1.5 && v.currentTime < 1) {
+                runAsRemote(() => {
+                  v.currentTime = target;
+                  setCurrentTime(target);
+                });
+              }
+            }
+          }}
           onWaiting={() => {
+            const v = videoRef.current;
             setIsLoading(true);
-            if (!isRemoteActionRef.current) onBufferingStart?.();
+            if (!v || v.paused || isRemoteActionRef.current || isRecoveringRef.current) return;
+            clearWaitingTimer();
+            waitingTimerRef.current = setTimeout(() => {
+              const vid = videoRef.current;
+              if (vid && !vid.paused && vid.readyState < 3 && !isRemoteActionRef.current && !isRecoveringRef.current) {
+                onBufferingStart?.();
+              }
+            }, 300);
           }}
           onPlaying={() => {
+            clearWaitingTimer();
             setIsLoading(false);
             setIsPlaying(true);
+            const v = videoRef.current;
+            if (v && isRecoveringRef.current) {
+              const target = lastKnownTimeRef.current;
+              isRecoveringRef.current = false;
+              if (target > 1.5 && v.currentTime < 1) {
+                runAsRemote(() => {
+                  v.currentTime = target;
+                  setCurrentTime(target);
+                });
+              }
+            }
             if (!isRemoteActionRef.current) onBufferingEnd?.();
           }}
           onPlay={() => {
             setIsPlaying(true);
+            const v = videoRef.current;
+            if (isRecoveringRef.current || (v && v.currentTime < 0.5 && lastKnownTimeRef.current > 3)) {
+              return;
+            }
             if (!isRemoteActionRef.current) onPlay?.();
           }}
           onPause={() => {
+            clearWaitingTimer();
             setIsPlaying(false);
+            const v = videoRef.current;
+            if (isRecoveringRef.current || (v && v.currentTime < 0.5 && lastKnownTimeRef.current > 3)) {
+              return;
+            }
             if (!isRemoteActionRef.current) onPause?.();
           }}
           onTimeUpdate={() => {
             const v = videoRef.current;
             if (!v) return;
+            if (v.currentTime > 0.5 && !isRecoveringRef.current) {
+              lastKnownTimeRef.current = v.currentTime;
+            }
             setCurrentTime(v.currentTime);
             if (Number.isFinite(v.duration)) setDuration(v.duration);
             if (v.buffered.length > 0) {
@@ -895,12 +987,17 @@ export const OnlineVideoPlayer = forwardRef<VideoPlayerHandle, OnlineVideoPlayer
             }
           }}
           onEnded={() => {
+            clearWaitingTimer();
             setIsPlaying(false);
             onEnded?.();
           }}
           onError={() => {
+            clearWaitingTimer();
             setIsLoading(false);
             if (!useStreamProxy && streamUrl && !streamUrl.startsWith('/api/browse/stream-proxy')) {
+              const v = videoRef.current;
+              if (v && v.currentTime > 1) lastKnownTimeRef.current = v.currentTime;
+              isRecoveringRef.current = lastKnownTimeRef.current > 1;
               setUseStreamProxy(true);
               return;
             }
